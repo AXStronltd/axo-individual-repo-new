@@ -44,6 +44,16 @@ export function buildApp() {
     }
   });
 
+  // The bare URL of the service (what a browser, or a host's uptime check, hits
+  // first). Says what this is and where to go — rather than a 404 that looks like
+  // an outage. Deliberately reveals nothing beyond what /health already does.
+  app.get('/', async () => ({
+    service: 'Axo API',
+    status: 'ok',
+    env: env.APP_ENV,
+    health: '/health',
+    docs: 'https://github.com/AXStronltd/axo-business/blob/main/docs/POS-API.md',
+  }));
   app.get('/health', async () => ({ ok: true, env: env.APP_ENV }));
 
   app.register(authRoutes);
