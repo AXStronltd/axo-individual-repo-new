@@ -125,14 +125,23 @@ export async function invoiceRoutes(app: FastifyInstance) {
     return reply.send(serialize(inv));
   });
 
-  // Transactions list with simple filters.
+  // Transactions list with simple filters. `since` (an ISO timestamp) returns
+  // only what is newer, so the Hub can poll for arriving payments without
+  // re-reading the whole feed each time.
   app.get('/transactions', { preHandler: [requireAuth] }, async (req, reply) => {
-    const q = req.query as { status?: string; type?: string };
+    const q = req.query as { status?: string; type?: string; since?: string };
+    let since: Date | undefined;
+    if (q.since) {
+      const parsed = new Date(q.since);
+      if (Number.isNaN(parsed.getTime())) return reply.code(400).send({ error: 'invalid_since' });
+      since = parsed;
+    }
     const list = await prisma.transaction.findMany({
       where: {
         merchantId: req.auth!.merchantId,
         ...(q.status ? { status: q.status as any } : {}),
         ...(q.type ? { type: q.type as any } : {}),
+        ...(since ? { createdAt: { gt: since } } : {}),
       },
       orderBy: { createdAt: 'desc' },
       take: 200,

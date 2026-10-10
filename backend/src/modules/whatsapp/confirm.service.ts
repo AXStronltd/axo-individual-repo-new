@@ -5,7 +5,7 @@ const CONFIRM_TTL_MS = 2 * 60 * 1000; // a staged confirmation lives 2 minutes
 
 export interface StageInput {
   waId: string;
-  action: 'send' | 'send_phone' | 'pay_till' | 'pay_bill';
+  action: 'send' | 'send_phone' | 'pay_till' | 'pay_bill' | 'send_global' | 'withdraw' | 'airtime' | 'bill' | 'approve_push';
   amountMinor: bigint;
   currency: string;
   summary: string;

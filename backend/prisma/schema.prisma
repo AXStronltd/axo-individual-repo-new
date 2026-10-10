@@ -51,14 +51,14 @@ enum TxnType {
   bill
   credit_draw
   credit_repay
-  p2p_transfer   // Axo-to-Axo customer send/receive
-  cash_in        // funded from an external provider into an Axo wallet
-  cash_out       // withdrawn from an Axo wallet to an external provider
+  p2p_transfer // Axo-to-Axo customer send/receive
+  cash_in // funded from an external provider into an Axo wallet
+  cash_out // withdrawn from an Axo wallet to an external provider
 }
 
 enum TxnStatus {
   awaiting_approval // maker-checker: created, not yet approved (payouts)
-  pending           // submitted to provider, not yet confirmed
+  pending // submitted to provider, not yet confirmed
   confirmed
   failed
   reversed
@@ -66,9 +66,9 @@ enum TxnStatus {
 
 enum ReconStatus {
   matched
-  unmatched   // we expected it, provider has not settled it
-  mismatch    // amounts differ
-  unexpected  // provider settled something not in our ledger
+  unmatched // we expected it, provider has not settled it
+  mismatch // amounts differ
+  unexpected // provider settled something not in our ledger
 }
 
 enum InvoiceStatus {
@@ -84,8 +84,8 @@ model Merchant {
   id            String        @id @default(uuid())
   legalName     String
   tradingName   String
-  country       String        // ISO-3166 alpha-2
-  currency      String        // ISO-4217
+  country       String // ISO-3166 alpha-2
+  currency      String // ISO-4217
   axoId         String        @unique
   kybTier       KybTier       @default(micro)
   kybStatus     String        @default("pending")
@@ -100,13 +100,13 @@ model Merchant {
 }
 
 model User {
-  id          String   @id @default(uuid())
-  merchantId  String
-  merchant    Merchant @relation(fields: [merchantId], references: [id])
-  name        String
-  email       String   @unique
-  phone       String?
-  role        Role     @default(owner)
+  id           String   @id @default(uuid())
+  merchantId   String
+  merchant     Merchant @relation(fields: [merchantId], references: [id])
+  name         String
+  email        String   @unique
+  phone        String?
+  role         Role     @default(owner)
   // argon2id hashes — never plaintext
   passwordHash String
   axoCodeHash  String?
@@ -134,30 +134,30 @@ model Account {
 
 // Immutable. Every money event posts >= 2 rows that net to zero.
 model LedgerEntry {
-  id          String      @id @default(uuid())
-  accountId   String
-  account     Account     @relation(fields: [accountId], references: [id])
+  id            String      @id @default(uuid())
+  accountId     String
+  account       Account     @relation(fields: [accountId], references: [id])
   transactionId String
-  transaction Transaction @relation(fields: [transactionId], references: [id])
-  direction   Direction
-  amountMinor BigInt
-  currency    String
-  postedAt    DateTime    @default(now())
+  transaction   Transaction @relation(fields: [transactionId], references: [id])
+  direction     Direction
+  amountMinor   BigInt
+  currency      String
+  postedAt      DateTime    @default(now())
 
   @@index([accountId])
   @@index([transactionId])
 }
 
 model Transaction {
-  id             String      @id @default(uuid())
+  id             String    @id @default(uuid())
   merchantId     String
-  merchant       Merchant    @relation(fields: [merchantId], references: [id])
+  merchant       Merchant  @relation(fields: [merchantId], references: [id])
   type           TxnType
-  status         TxnStatus   @default(pending)
+  status         TxnStatus @default(pending)
   amountMinor    BigInt
   currency       String
-  provider       String      @default("axo")
-  providerRef    String?     // set once the provider assigns it
+  provider       String    @default("axo")
+  providerRef    String? // set once the provider assigns it
   idempotencyKey String?
   customerRef    String?
   // for refunds/reversals: the original transaction they correct
@@ -166,12 +166,19 @@ model Transaction {
   makerId        String?
   checkerId      String?
   approvedAt     DateTime?
-  createdAt      DateTime    @default(now())
+  createdAt      DateTime  @default(now())
   confirmedAt    DateTime?
   // settlement reconciliation link
   settlementId   String?
+  // Axo-wallet payments: the customer-side P2PTransfer this transaction is the
+  // merchant-side leg of. Links the two ledgers so a receipt, a refund or a
+  // reconciliation can find both halves of one payment.
+  transferId     String?   @unique
+  // running total refunded against this payment_in; a refund can never take it
+  // past amountMinor
+  refundedMinor  BigInt    @default(0)
 
-  entries        LedgerEntry[]
+  entries         LedgerEntry[]
   invoicePayments InvoicePayment[]
 
   @@unique([provider, providerRef])
@@ -180,18 +187,18 @@ model Transaction {
 }
 
 model Invoice {
-  id          String        @id @default(uuid())
-  merchantId  String
-  merchant    Merchant      @relation(fields: [merchantId], references: [id])
-  number      String        // sequential per merchant
-  customerName String
+  id            String        @id @default(uuid())
+  merchantId    String
+  merchant      Merchant      @relation(fields: [merchantId], references: [id])
+  number        String // sequential per merchant
+  customerName  String
   customerPhone String?
-  status      InvoiceStatus @default(draft)
+  status        InvoiceStatus @default(draft)
   subtotalMinor BigInt
-  taxRate     Float         @default(0)
-  dueDate     DateTime?
-  issuedAt    DateTime?
-  createdAt   DateTime      @default(now())
+  taxRate       Float         @default(0)
+  dueDate       DateTime?
+  issuedAt      DateTime?
+  createdAt     DateTime      @default(now())
 
   payments InvoicePayment[]
 
@@ -217,7 +224,7 @@ model IdempotencyKey {
   key          String   @id
   merchantId   String
   endpoint     String
-  responseJson String   // serialized result to replay
+  responseJson String // serialized result to replay
   createdAt    DateTime @default(now())
 
   @@index([merchantId])
@@ -225,16 +232,16 @@ model IdempotencyKey {
 
 // De-dupe inbound provider webhooks by their event id.
 model WebhookEvent {
-  id         String   @id // provider event id
-  provider   String
+  id          String   @id // provider event id
+  provider    String
   processedAt DateTime @default(now())
 }
 
 enum BatchStatus {
-  draft           // created, not approved
-  approved        // maker-checker passed
+  draft // created, not approved
+  approved // maker-checker passed
   executing
-  completed       // all items done (some may have failed)
+  completed // all items done (some may have failed)
   failed
 }
 
@@ -246,15 +253,15 @@ enum BatchItemStatus {
 
 // A bulk payment / payroll batch: many recipients paid in one approved run.
 model Batch {
-  id          String      @id @default(uuid())
-  merchantId  String
-  kind        String      // "payroll" | "supplier" | "bulk"
-  currency    String
-  status      BatchStatus @default(draft)
-  makerId     String?
-  checkerId   String?
-  approvedAt  DateTime?
-  createdAt   DateTime    @default(now())
+  id         String      @id @default(uuid())
+  merchantId String
+  kind       String // "payroll" | "supplier" | "bulk"
+  currency   String
+  status     BatchStatus @default(draft)
+  makerId    String?
+  checkerId  String?
+  approvedAt DateTime?
+  createdAt  DateTime    @default(now())
 
   items BatchItem[]
 
@@ -265,8 +272,8 @@ model BatchItem {
   id            String          @id @default(uuid())
   batchId       String
   batch         Batch           @relation(fields: [batchId], references: [id])
-  recipient     String          // name/tag
-  destination   String          // account/phone ref
+  recipient     String // name/tag
+  destination   String // account/phone ref
   amountMinor   BigInt
   status        BatchItemStatus @default(queued)
   // the payout transaction created when this item is executed; also the
@@ -281,17 +288,17 @@ model BatchItem {
 // Reconciliation compares our expected amount (confirmed transactions) to the
 // actual amount the provider settled, on providerRef.
 model Settlement {
-  id             String      @id @default(uuid())
-  merchantId     String
-  provider       String
-  providerRef    String      // the provider's own reference for this payment
-  actualMinor    BigInt      // what the provider says it settled
-  feeMinor       BigInt      @default(0)
-  currency       String
-  reconStatus    ReconStatus @default(unmatched)
-  matchedTxnId   String?     // our transaction it matched to
-  importedAt     DateTime    @default(now())
-  resolvedAt     DateTime?
+  id           String      @id @default(uuid())
+  merchantId   String
+  provider     String
+  providerRef  String // the provider's own reference for this payment
+  actualMinor  BigInt // what the provider says it settled
+  feeMinor     BigInt      @default(0)
+  currency     String
+  reconStatus  ReconStatus @default(unmatched)
+  matchedTxnId String? // our transaction it matched to
+  importedAt   DateTime    @default(now())
+  resolvedAt   DateTime?
 
   @@unique([provider, providerRef])
   @@index([merchantId])
@@ -318,47 +325,47 @@ model Counter {
 // ============================================================================
 
 enum CustomerStatus {
-  unverified   // registered, phone not yet verified
+  unverified // registered, phone not yet verified
   active
   review
-  frozen       // risk hold; no debits until released
+  frozen // risk hold; no debits until released
 }
 
 enum CustomerKycTier {
-  basic        // phone-verified only: low limits
-  verified     // ID-verified: higher limits
+  basic // phone-verified only: low limits
+  verified // ID-verified: higher limits
 }
 
 model Customer {
-  id            String          @id @default(uuid())
-  axoTag        String          @unique      // public handle, e.g. @amina
-  displayName   String
-  country       String          // ISO-3166 alpha-2
-  currency      String          // ISO-4217, their wallet currency
-  status        CustomerStatus  @default(unverified)
-  kycTier       CustomerKycTier @default(basic)
+  id          String          @id @default(uuid())
+  axoTag      String          @unique // public handle, e.g. @amina
+  displayName String
+  country     String // ISO-3166 alpha-2
+  currency    String // ISO-4217, their wallet currency
+  status      CustomerStatus  @default(unverified)
+  kycTier     CustomerKycTier @default(basic)
   // Per-transaction PIN (the M-Pesa PIN). argon2id hash, never plaintext.
-  pinHash       String?
-  pinFailures   Int             @default(0)
-  createdAt     DateTime        @default(now())
+  pinHash     String?
+  pinFailures Int             @default(0)
+  createdAt   DateTime        @default(now())
 
-  wallet     CustomerAccount?
-  waLink     WhatsAppLink?
-  sentXfers     P2PTransfer[]   @relation("sender")
-  receivedXfers P2PTransfer[]   @relation("recipient")
+  wallet        CustomerAccount?
+  waLink        WhatsAppLink?
+  sentXfers     P2PTransfer[]    @relation("sender")
+  receivedXfers P2PTransfer[]    @relation("recipient")
 }
 
 // One wallet account per customer. balanceMinor is the cached mirror of the
 // CustomerLedgerEntry sum, updated in the same DB transaction that posts.
 model CustomerAccount {
-  id           String   @id @default(uuid())
-  customerId   String   @unique
-  customer     Customer @relation(fields: [customerId], references: [id])
-  currency     String
-  balanceMinor BigInt   @default(0)
+  id            String   @id @default(uuid())
+  customerId    String   @unique
+  customer      Customer @relation(fields: [customerId], references: [id])
+  currency      String
+  balanceMinor  BigInt   @default(0)
   // reserved funds (e.g. a transfer in flight) that are not spendable
-  reservedMinor BigInt  @default(0)
-  createdAt    DateTime @default(now())
+  reservedMinor BigInt   @default(0)
+  createdAt     DateTime @default(now())
 
   entries CustomerLedgerEntry[]
 }
@@ -387,16 +394,16 @@ model CustomerLedgerEntry {
 // trusted AFTER OTP verification (verifiedAt set). WhatsApp identity alone is
 // never sufficient to authorize a financial action.
 model WhatsAppLink {
-  id          String    @id @default(uuid())
-  customerId  String    @unique
-  customer    Customer  @relation(fields: [customerId], references: [id])
-  waId        String    @unique   // WhatsApp phone number id (E.164 digits)
-  phone       String                // display phone
-  verifiedAt  DateTime?
+  id               String    @id @default(uuid())
+  customerId       String    @unique
+  customer         Customer  @relation(fields: [customerId], references: [id])
+  waId             String    @unique // WhatsApp phone number id (E.164 digits)
+  phone            String // display phone
+  verifiedAt       DateTime?
   // step-up: a short-lived session token minted after a successful OTP; sensitive
   // actions require a live (unexpired) session, not just a linked number.
   sessionExpiresAt DateTime?
-  createdAt   DateTime  @default(now())
+  createdAt        DateTime  @default(now())
 
   @@index([waId])
 }
@@ -404,22 +411,22 @@ model WhatsAppLink {
 // One-time passcodes for phone verification and step-up. The code is stored as
 // an argon2id hash — never plaintext. Attempts are capped.
 model OtpChallenge {
-  id          String   @id @default(uuid())
+  id          String    @id @default(uuid())
   waId        String
-  purpose     String   // "link" | "stepup"
+  purpose     String // "link" | "stepup"
   codeHash    String
-  attempts    Int      @default(0)
-  maxAttempts Int      @default(5)
+  attempts    Int       @default(0)
+  maxAttempts Int       @default(5)
   expiresAt   DateTime
   consumedAt  DateTime?
-  createdAt   DateTime @default(now())
+  createdAt   DateTime  @default(now())
 
   @@index([waId])
 }
 
 enum P2PStatus {
-  pending     // created, funds reserved on sender
-  completed   // posted to the ledger, recipient credited
+  pending // created, funds reserved on sender
+  completed // posted to the ledger, recipient credited
   failed
   reversed
 }
@@ -438,7 +445,7 @@ model P2PTransfer {
   status         P2PStatus @default(pending)
   note           String?
   idempotencyKey String?   @unique
-  reversesId     String?   // if this reverses an earlier transfer
+  reversesId     String? // if this reverses an earlier transfer
   createdAt      DateTime  @default(now())
   completedAt    DateTime?
 
@@ -451,8 +458,8 @@ model P2PTransfer {
 }
 
 enum CashStatus {
-  pending     // submitted to the external ramp, not yet confirmed
-  confirmed   // webhook confirmed; wallet credited (in) / debited (out)
+  pending // submitted to the external ramp, not yet confirmed
+  confirmed // webhook confirmed; wallet credited (in) / debited (out)
   failed
   reversed
 }
@@ -502,19 +509,19 @@ enum AgentStatus {
 }
 
 model Agent {
-  id             String      @id @default(uuid())
-  code           String      @unique      // the agent/store code a customer quotes
-  name           String
-  country        String
-  currency       String
-  status         AgentStatus @default(active)
+  id              String      @id @default(uuid())
+  code            String      @unique // the agent/store code a customer quotes
+  name            String
+  country         String
+  currency        String
+  status          AgentStatus @default(active)
   // the agent's prepaid liquidity, in minor units. cash-in moves float→customer;
   // cash-out moves customer→float. An agent cannot cash-in beyond its float.
-  floatMinor     BigInt      @default(0)
+  floatMinor      BigInt      @default(0)
   // accrued, unpaid commission the agent has earned on volume.
-  commissionMinor BigInt     @default(0)
-  commissionBps  Int         @default(50) // 0.50% default earn rate
-  createdAt      DateTime    @default(now())
+  commissionMinor BigInt      @default(0)
+  commissionBps   Int         @default(50) // 0.50% default earn rate
+  createdAt       DateTime    @default(now())
 
   txns AgentTxn[]
 
@@ -524,20 +531,20 @@ model Agent {
 enum AgentTxnKind {
   cash_in
   cash_out
-  float_topup   // the agent buys more float (settled off-platform / by Axo)
+  float_topup // the agent buys more float (settled off-platform / by Axo)
 }
 
 model AgentTxn {
-  id          String       @id @default(uuid())
-  agentId     String
-  agent       Agent        @relation(fields: [agentId], references: [id])
-  kind        AgentTxnKind
-  customerId  String?
-  amountMinor BigInt
-  commissionMinor BigInt   @default(0)
-  currency    String
-  idempotencyKey String?   @unique
-  createdAt   DateTime     @default(now())
+  id              String       @id @default(uuid())
+  agentId         String
+  agent           Agent        @relation(fields: [agentId], references: [id])
+  kind            AgentTxnKind
+  customerId      String?
+  amountMinor     BigInt
+  commissionMinor BigInt       @default(0)
+  currency        String
+  idempotencyKey  String?      @unique
+  createdAt       DateTime     @default(now())
 
   @@index([agentId])
 }
@@ -556,24 +563,24 @@ enum BillerKind {
 }
 
 model BillerPurchase {
-  id          String     @id @default(uuid())
-  customerId  String
-  kind        BillerKind
-  target      String     // phone topped up, or utility account/meter number
-  amountMinor BigInt
-  currency    String
-  token       String?    // e.g. an electricity token to enter on the meter
-  status      String     @default("completed")
-  idempotencyKey String? @unique
-  createdAt   DateTime   @default(now())
+  id             String     @id @default(uuid())
+  customerId     String
+  kind           BillerKind
+  target         String // phone topped up, or utility account/meter number
+  amountMinor    BigInt
+  currency       String
+  token          String? // e.g. an electricity token to enter on the meter
+  status         String     @default("completed")
+  idempotencyKey String?    @unique
+  createdAt      DateTime   @default(now())
 
   @@index([customerId])
 }
 
 enum ClaimStatus {
-  unclaimed   // sender reserved funds; recipient hasn't claimed yet
-  claimed     // recipient provisioned + credited
-  refunded    // expired or recalled → returned to sender
+  unclaimed // sender reserved funds; recipient hasn't claimed yet
+  claimed // recipient provisioned + credited
+  refunded // expired or recalled → returned to sender
 }
 
 // Send money to a phone number that has NO Axo wallet yet (M-Pesa
@@ -582,9 +589,9 @@ enum ClaimStatus {
 // credited. If unclaimed by expiry (or recalled), it auto-refunds the sender.
 model ClaimableTransfer {
   id             String      @id @default(uuid())
-  code           String      @unique      // the claim code the recipient uses
+  code           String      @unique // the claim code the recipient uses
   senderId       String
-  recipientWaId  String                    // destination phone (digits)
+  recipientWaId  String // destination phone (digits)
   amountMinor    BigInt
   currency       String
   note           String?
@@ -606,15 +613,15 @@ model ClaimableTransfer {
 model PendingConfirm {
   id          String   @id @default(uuid())
   waId        String   @unique
-  action      String   // "send" | "send_phone" | "pay_till" | "pay_bill"
-  toTag       String?  // recipient @tag (send)
-  toPhone     String?  // recipient phone (send_phone)
-  number      String?  // till/paybill number
-  account     String?  // paybill account
+  action      String // "send" | "send_phone" | "pay_till" | "pay_bill" | "send_global" | "withdraw" | "airtime" | "bill" | "approve_push" (number = request ref)
+  toTag       String? // recipient @tag (send)
+  toPhone     String? // recipient phone (send_phone)
+  number      String? // till/paybill number
+  account     String? // paybill account
   amountMinor BigInt
   currency    String
   note        String?
-  summary     String   // the human line shown to the user, e.g. "Pay KES 500 to @amina"
+  summary     String // the human line shown to the user, e.g. "Pay KES 500 to @amina"
   expiresAt   DateTime
   createdAt   DateTime @default(now())
 
@@ -626,11 +633,11 @@ model PendingConfirm {
 // what lets "anyone with WhatsApp pay a business like M-Pesa" without prior signup.
 model PendingPayIntent {
   id          String   @id @default(uuid())
-  waId        String   @unique          // one in-flight intent per number
-  kind        String                     // "till" | "paybill" | "push"
-  number      String?                    // till/paybill number
-  account     String?                    // paybill account line
-  pushRef     String?                    // if resuming a push approval
+  waId        String   @unique // one in-flight intent per number
+  kind        String // "till" | "paybill" | "push"
+  number      String? // till/paybill number
+  account     String? // paybill account line
+  pushRef     String? // if resuming a push approval
   amountMinor BigInt
   currency    String
   createdAt   DateTime @default(now())
@@ -639,55 +646,129 @@ model PendingPayIntent {
 }
 
 enum PushStatus {
-  pending     // sent to the customer, awaiting approval
-  approved    // customer approved; payment posted
+  pending // sent to the customer, awaiting approval
+  approved // customer approved; payment posted
   declined
   expired
+  cancelled // withdrawn by the business before it was paid
 }
 
-// A push-to-pay prompt (the Axo equivalent of an M-Pesa STK push). The merchant
-// pushes it to a customer's Axo/WhatsApp; the customer approves, and ONLY then
-// does payMerchant run. A request alone never moves money.
+// A PAYMENT REQUEST from a business. Two shapes share this table:
+//  - targeted (customerId set): the Axo equivalent of an M-Pesa STK push — sent
+//    to one customer, who approves it with their PIN.
+//  - open (customerId null): created at a till or by a POS for one sale, shown as
+//    a QR / link, and payable by whichever Axo customer scans it.
+// Either way the customer approves, and ONLY then does payMerchant run. A
+// request alone never moves money; once paid it can never be paid again.
 model PushPrompt {
-  id          String     @id @default(uuid())
-  ref         String     @unique   // CheckoutRequestID-style reference
-  merchantId  String
-  customerId  String?              // resolved from the WA/tag the merchant targeted
-  targetWaId  String?              // who it was sent to
-  amountMinor BigInt
-  currency    String
-  account     String?              // paybill account line, if any
-  status      PushStatus @default(pending)
-  idempotencyKey String?  @unique
-  expiresAt   DateTime
-  createdAt   DateTime   @default(now())
-  resolvedAt  DateTime?
+  id                    String     @id @default(uuid())
+  ref                   String     @unique // public, unguessable reference (QR / link / CheckoutRequestID)
+  merchantId            String
+  customerId            String? // targeted customer; null = open request
+  targetWaId            String? // who it was sent to
+  amountMinor           BigInt
+  currency              String
+  account               String? // paybill account line, if any
+  // the merchant's own reference for the sale (order no., receipt no.); unique
+  // per merchant so a POS retry can never open a second request for one sale
+  saleRef               String?
+  description           String?
+  createdById           String? // staff user or API key that raised it
+  status                PushStatus @default(pending)
+  idempotencyKey        String?    @unique
+  expiresAt             DateTime
+  createdAt             DateTime   @default(now())
+  resolvedAt            DateTime?
+  // set when paid: who paid, and both halves of the payment
+  paidByCustomerId      String?
+  transferId            String?    @unique
+  merchantTransactionId String?    @unique
 
+  @@unique([merchantId, saleRef])
   @@index([merchantId])
   @@index([status])
+}
+
+// Where a business wants payment events delivered (its POS / back office).
+// Each delivery is signed with this endpoint's secret.
+model MerchantWebhook {
+  id         String   @id @default(uuid())
+  merchantId String
+  url        String
+  secret     String // HMAC-SHA256 signing secret, shown once at creation
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now())
+
+  @@index([merchantId])
+}
+
+enum DeliveryStatus {
+  pending // waiting for its next attempt
+  delivered // endpoint answered 2xx
+  failed // gave up after the maximum attempts
+}
+
+// TRANSACTIONAL OUTBOX for merchant notifications. A row is written in the SAME
+// database transaction that posts the payment, so a committed payment always has
+// its notification queued and a rolled-back one never does. A dispatcher then
+// delivers it with retries; delivery is at-least-once, so receivers de-dup on
+// eventId.
+model WebhookDelivery {
+  id            String         @id @default(uuid()) // also the eventId sent to the merchant
+  merchantId    String
+  endpointId    String
+  event         String // e.g. "payment.succeeded"
+  payloadJson   String
+  status        DeliveryStatus @default(pending)
+  attempts      Int            @default(0)
+  nextAttemptAt DateTime       @default(now())
+  lastError     String?
+  createdAt     DateTime       @default(now())
+  deliveredAt   DateTime?
+
+  @@index([status, nextAttemptAt])
+  @@index([merchantId])
+}
+
+// A machine credential for a merchant's POS or back office. Only a hash is
+// stored; the key is shown once. It acts with a fixed role (cashier by default)
+// so a till can raise and read payment requests but not, say, issue refunds.
+model ApiKey {
+  id          String    @id @default(uuid())
+  merchantId  String
+  name        String
+  prefix      String    @unique // first characters, for lookup and display
+  keyHash     String // sha256 of the full key
+  role        Role      @default(cashier)
+  createdById String?
+  createdAt   DateTime  @default(now())
+  lastUsedAt  DateTime?
+  revokedAt   DateTime?
+
+  @@index([merchantId])
 }
 
 // A payment number ISSUED BY AXO to a merchant — the Till / Paybill / Pay-ID
 // that an Axo individual pays, exactly as an M-Pesa customer pays a business.
 // Resolving a number here is how "pay till 832909" finds the right merchant.
 enum PayNumberKind {
-  till       // Buy Goods equivalent
-  paybill    // account-based collections
-  payid      // online / invoice
+  till // Buy Goods equivalent
+  paybill // account-based collections
+  payid // online / invoice
 }
 
 model PayNumber {
   id         String        @id @default(uuid())
   merchantId String
   kind       PayNumberKind
-  number     String                      // the digits the customer quotes
+  number     String // the digits the customer quotes
   label      String?
   active     Boolean       @default(true)
   createdAt  DateTime      @default(now())
 
   lines PayNumberLine[]
 
-  @@unique([kind, number])               // a number is globally unique per kind
+  @@unique([kind, number]) // a number is globally unique per kind
   @@index([merchantId])
 }
 
@@ -697,7 +778,7 @@ model PayNumberLine {
   id          String    @id @default(uuid())
   payNumberId String
   payNumber   PayNumber @relation(fields: [payNumberId], references: [id])
-  account     String                      // normalized code
+  account     String // normalized code
   name        String?
   active      Boolean   @default(true)
 
@@ -707,33 +788,33 @@ model PayNumberLine {
 enum RiskCaseStatus {
   open
   under_review
-  cleared       // analyst allowed it
-  confirmed     // analyst confirmed the risk (stays blocked)
+  cleared // analyst allowed it
+  confirmed // analyst confirmed the risk (stays blocked)
 }
 
 enum RiskCaseKind {
-  transaction_review   // a movement scored >= review
-  transaction_blocked  // a movement scored >= block
-  manual_freeze        // an operator froze an account
-  fraud_report         // a customer/merchant reported fraud
+  transaction_review // a movement scored >= review
+  transaction_blocked // a movement scored >= block
+  manual_freeze // an operator froze an account
+  fraud_report // a customer/merchant reported fraud
 }
 
 // A compliance/fraud case. Append-only history via AuditLog; the case row holds
 // current state. Maker-checker: the operator who freezes cannot also release.
 model RiskCase {
-  id           String         @id @default(uuid())
-  kind         RiskCaseKind
-  status       RiskCaseStatus @default(open)
+  id          String         @id @default(uuid())
+  kind        RiskCaseKind
+  status      RiskCaseStatus @default(open)
   // who/what this is about (a customer id, merchant id, or transfer id)
-  subjectType  String         // "customer" | "merchant" | "transfer" | "cash"
-  subjectId    String
-  score        Int            @default(0)
-  signalsJson  String?        // the risk signals that fired
-  reason       String?
-  openedBy     String?        // operator or "system"
-  resolvedBy   String?
-  resolvedAt   DateTime?
-  createdAt    DateTime       @default(now())
+  subjectType String // "customer" | "merchant" | "transfer" | "cash"
+  subjectId   String
+  score       Int            @default(0)
+  signalsJson String? // the risk signals that fired
+  reason      String?
+  openedBy    String? // operator or "system"
+  resolvedBy  String?
+  resolvedAt  DateTime?
+  createdAt   DateTime       @default(now())
 
   @@index([status])
   @@index([subjectType, subjectId])
@@ -743,8 +824,8 @@ model RiskCase {
 // screening provider; the value is stored normalized (lowercased, despaced).
 model DenylistEntry {
   id        String   @id @default(uuid())
-  value     String   @unique   // normalized tag / phone / account
-  kind      String              // "tag" | "phone" | "account"
+  value     String   @unique // normalized tag / phone / account
+  kind      String // "tag" | "phone" | "account"
   reason    String?
   addedBy   String?
   createdAt DateTime @default(now())

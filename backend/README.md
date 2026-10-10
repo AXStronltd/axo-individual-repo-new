@@ -25,17 +25,17 @@ TypeScript · Fastify · PostgreSQL (Prisma) · Redis-ready · Vitest.
 - **Sandbox provider** — runs the full request → pending → webhook → confirmed → ledger path with no real money. `APP_ENV` chooses sandbox vs live, not the code path.
 - **Invoicing & collections (Phase 3)** — `POST /invoices` with per-merchant sequential numbers, integer tax, issue/cancel, and `POST /invoices/:id/payments` for full or partial payments that flow through the same ledger and advance the invoice state (draft → issued → partially_paid → paid; overdue derived). Transactions list + CSV export.
 - **Payouts (Phase 4)** — `POST /payouts` creates a maker-checker request (no money moves); `POST /payouts/:id/approve` requires a different user, debits the balance under a lock, and submits to the provider. A rejected payout rolls its ledger move back. Balance-sufficiency is checked so a payout can't overdraw.
-- **Refunds** — `POST /transactions/:id/refund` posts a new linked transaction + entries, never editing the original.
+- **Refunds** — `POST /transactions/:id/refund` (owner/accountant, `Idempotency-Key`) refunds an Axo-wallet payment in full or in part: a new linked transaction on the merchant ledger and a credit back to the customer's wallet on the customer ledger, in one transaction. Capped at the amount paid (`refundedMinor`), so a payment can't be refunded twice. Payments that arrived over an external rail are refused until a rail refund API is integrated.
 - **Settlement & reconciliation (Phase 4)** — `POST /settlements/import` ingests a provider settlement file and matches expected (our confirmed transactions) against actual on `providerRef`, producing matched / unmatched / mismatch / unexpected rows plus fee and net totals. `POST /reconciliation/:id/resolve` clears a mismatch with an adjustment entry — never an edit.
 - **Bulk payments & payroll (Phase 5)** — `POST /batches` ingests recipients as JSON or CSV, **validates** (required fields, positive amounts, line-numbered errors) and flags **duplicate destinations**, then previews the total. `POST /batches/:id/approve` is maker-checker (a different user). `POST /batches/:id/execute` pays each item as its own ledger-posting payout and is **retry-safe**: an already-paid item is skipped, so re-running after a partial failure never double-pays. Per-item status is tracked.
 - **Customer wallet + Axo-to-Axo P2P (Phase 6)** — a `Customer` is an individual wallet-holder (distinct from a merchant's staff `User`s), with its own `CustomerAccount` and a **separate double-entry customer ledger**. `sendP2P` moves money between two customers server-authoritatively: it quotes, checks account status (a **frozen** wallet is blocked), enforces **per-tier per-transaction and daily limits**, verifies funds, and posts balanced legs in one serializable transaction. Idempotent on `idempotencyKey` — a repeat never double-sends. Self-sends and cross-currency (without a provider route) are refused.
-- **Customer pays a business (Phase 6)** — `POST /payments/customer` (merchant taken from the token, never the body; `Idempotency-Key` required): a customer pays the business over Axo and the money lands straight in the merchant's `axo_balance`. Posted on **both** ledgers in one transaction (customer: wallet → clearing; merchant: clearing → balance), so the business sees it in its statements, reports and reconciliation — with no telco till in between.
-- **Pay a business by its Till / Paybill over WhatsApp (Phase 6)** — the full M-Pesa-equivalent, from the individual's chat: any Axo wallet-holder sends `TILL 832909 500` or `PAYBILL 600921 RENT 5000` and `payByNumber` resolves the Axo-issued `PayNumber` to the merchant (validating the account line for a paybill), then runs the same server-authoritative `payMerchant` path (ledger, risk screen, idempotency). An unknown number or account line is refused, never guessed.
+- **Customer pays a business (Phase 6)** — from the customer's **own** session (`POST /customer/payments/by-number`, `POST /customer/payment-requests/:ref/pay`, or WhatsApp + PIN), the money lands straight in the merchant's `axo_balance`. (The old merchant-side `POST /payments/customer` let any staff token debit any wallet and has been removed — see `SECURITY.md`.) Posted on **both** ledgers in one transaction (customer: wallet → clearing; merchant: clearing → balance), so the business sees it in its statements, reports and reconciliation — with no telco till in between.
+- **Pay a business by its Till / Paybill over WhatsApp (Phase 6)** — the full M-Pesa-equivalent, from the individual's chat: any Axo wallet-holder sends `TILL 832909 500` or `PAYBILL 600921 RENT 5000` and `payByNumber` resolves the Axo-issued `PayNumber` to the merchant (validating the account line for a paybill), then runs the same server-authoritative `payMerchant` path (ledger, risk screen, idempotency, merchant outbox event). An unknown number or account line is refused, never guessed.
 - **First-contact onboarding — ANYONE with WhatsApp can pay (Phase 6)** — a brand-new number that has never used Axo and texts `PAY TILL 832909 500` is **not turned away**: the router stashes the intended payment (`PendingPayIntent`), sends a one-step OTP, and the moment they verify, `resumePendingPay` creates their wallet and completes the payment automatically. So it works exactly like M-Pesa, where any phone can just pay a till — no prior signup, no app to install, the wallet is created on the spot as part of the first payment. `shouldOnboardForPayment` gates this to payment intents only (a bare `BALANCE`/`HELP` from a stranger still gets the normal prompt).
 - **WhatsApp Cloud API gateway (Phase 6)** — `GET /webhooks/whatsapp` does Meta's subscription handshake; `POST /webhooks/whatsapp` **verifies the `X-Hub-Signature-256` HMAC over the raw body** (constant-time), **de-dupes** on the WhatsApp message id (retries are ignored), and routes the message. Conversational flows: `REGISTER` → OTP (6-digit, argon2id-hashed, expiring, attempt-capped) → wallet; `BALANCE`, `SEND <amt> to @tag`, `HISTORY`, `HELP`. Verbs parsed in English, Swahili and Somali. A money action requires a **live verified session**, not just a linked number — WhatsApp identity alone never authorizes a transfer. Outbound messaging is a documented adapter: unconfigured credentials ⇒ reported **unavailable**, never a faked send.
 - **Cash-in / cash-out ramps (Phase 7)** — the on-ramp/off-ramp. A `RampProvider` adapter declares which ops, countries and currencies it supports and whether it is configured; `pickRamp` chooses one or returns **nothing** (feature genuinely unavailable — never a faked transfer). **Cash-in** creates a PENDING record, submits to the ramp, and only **credits the wallet when a verified webhook confirms** (wallet credit vs clearing debit — the customer ledger stays balanced). **Cash-out** **reserves** the funds immediately so they can't be double-spent, submits to the ramp, and **debits on confirm**; a rejection or a failed webhook **releases the reservation**. Idempotent on `idempotencyKey`; webhook de-dup on event id and a status guard so a replayed webhook is a no-op. Ships with a signed-webhook sandbox ramp and an **M-Pesa (Daraja) adapter template** that is unavailable until credentials are supplied.
 - **Risk & compliance (Phase 8)** — a pure, explainable risk engine (`assessRisk`) scores every customer-initiated movement BEFORE money moves: sanctions/fraud **denylist** hits (sender/recipient/cash-out destination) force a block; **velocity** (txns/hour), **fan-out** (many recipients fast), **possible structuring** (repeated near-limit amounts) and spikes raise weighted, logged signals → `allow` / `review` / `block`. The screen is wired into `sendP2P` and cash-out: a **block** refuses and opens a case; a **review** proceeds but opens a case for an analyst. **Account freeze/release** is maker-checker (the operator who froze cannot release); a frozen wallet can't debit. `RiskCase` tracks review/blocked/freeze/fraud-report cases with their firing signals; a denylist and a fraud-report endpoint round it out. Every decision is deterministic and reconstructable from the stored signals.
-- **QR + STK-style push-to-pay (Phase 9)** — `GET /collect/qr` builds a scannable `axo://pay?…` string for the merchant's Till/Paybill (optionally with a baked-in amount). `POST /collect/push` is the **STK equivalent**: the merchant pushes a pay prompt to a customer's Axo/WhatsApp and **no money moves** — it creates a PENDING `PushPrompt` (a CheckoutRequestID-style `ref`, 2-min expiry) and notifies the customer. The customer approves with **YES** in WhatsApp (or `POST /collect/push/:ref/approve`), and only then does the same `payMerchant` path run, idempotent on the prompt ref. `POST /collect/scan` turns a scanned QR into a push the customer confirms — scanning never auto-charges.
+- **QR + STK-style push-to-pay (Phase 9)** — `GET /collect/qr` builds a scannable `axo://pay?…` string for the merchant's Till/Paybill (optionally with a baked-in amount). `POST /collect/push` is the **STK equivalent**: the merchant pushes a pay prompt to a customer's Axo/WhatsApp and **no money moves** — it creates a PENDING `PushPrompt` (a CheckoutRequestID-style `ref`, 2-min expiry) and notifies the customer. The customer approves with their **PIN** in WhatsApp (YES only if they have no PIN *and* a live verified session) or `POST /customer/payment-requests/:ref/pay` with their own token + PIN, and only then does the same `payMerchant` path run — exactly once per request. A push is now one kind of **payment request**; see below.
 - **Crypto receive + global send (Phase 9)** — a **crypto `RampProvider`** (USDC/USDT/USD, global) lets a business **receive stablecoin** into its Axo balance (webhook-confirmed, credited through the ledger like any cash-in) and **send stablecoin out**; unavailable without custody credentials, so it never fakes a transfer. `POST /global/quote` gives an integer-safe, **spread-disclosed FX quote**; `POST /global/send` executes a cross-border transfer as a reserved cash-out through a configured ramp (the crypto rail, or a bank/agent abroad), settling on the ramp webhook. A pair with no rate is refused.
 - **More M-Pesa parity (Phase 10)** — the remaining individual-side features:
   - **Send to an unregistered number** — `SENDTO +254711 500` to anyone, even with no Axo wallet. The sender's funds are **reserved**, the recipient gets a `CLAIM <code>` message; claiming provisions their wallet and completes it; unclaimed sends **auto-refund** after 7 days (`sweepExpiredClaims`) or on `RECALL <code>`. (`ClaimableTransfer`.)
@@ -47,7 +47,11 @@ TypeScript · Fastify · PostgreSQL (Prisma) · Redis-ready · Vitest.
 - **Two-sided symmetry (Phase 13)** — every money direction now exists on both sides. A **business pays an individual's Axo wallet** (`businessPayCustomer`, `POST /payments/to-customer`) — the mirror of a customer paying a business — and the individual is **notified on WhatsApp** ("💰 You received X from <business>") via `notifyCredit`, so inbound money reads as clearly as a person-to-person send. The individual chat also gains the powers the business Hub already had: **`CRYPTO`** shows the customer's stablecoin deposit address (receive USDC/USDT from anywhere), and **`GLOBAL <amount> <CUR> to <dest>`** sends cross-border through the ramp, confirm-and-PIN-gated like every send. Each business "receive" feature maps to an individual "send" feature and back.
 - **Account recovery & lost-phone claims (Phase 15)** — a pending send is tied to a *number*, but a person can lose the number the money was addressed to. Two functions close that gap so money follows the person, not the SIM. **`claimByIdentity({ code, customerId })`** settles a pending claim to a customer who has **proven their identity** (the recovery flow: permanent Axo ID + recovery email + Axo Code) even though the recipient number no longer matches — identity, not the number, is the authority; a frozen account is refused. The WhatsApp `CLAIM <code>` handler uses this automatically: if a verified user claims a code addressed to a number they no longer use, it falls back from the number match to the identity match. **`repointClaimsToNewNumber({ oldWaId, newWaId })`** moves every still-unclaimed transfer from an old number to a new one during recovery / number change, so a payment in flight is never stranded. Exposed at `POST /claims/:code/claim-by-identity` and `POST /claims/repoint`; the individual front-end surfaces the re-point on the number-change receipt ("1 payment moved to this account").
 - **Agent network — Axo's own cash on-ramp/off-ramp (Phase 11)** — an `Agent` has a prepaid **float** and earns **commission**. `agentCashIn` credits a customer's wallet from the agent's float (a customer hands over cash → wallet goes up, float goes down); `agentCashOut` does the reverse (agent pays cash → wallet down, float up). Both settle **instantly against float — no telco, no external webhook** — post through the customer ledger (balanced vs clearing), accrue the agent's commission, and are idempotent. An agent can't cash-in beyond its float, and can't cash-out more than the customer holds. This is the on-ramp that makes Axo independent of any telco: the same model M-PESA used to bootstrap, owned by Axo.
-- **Tests** — money math, ledger invariants, invoice logic, reconciliation, batch validation, P2P limits/legs/service, WhatsApp signature/de-dup/intent/OTP (pay-Till/Paybill, send-to-phone, claim/recall, setpin, mini), **claimable transfers (claim-by-number, claim-by-identity, re-point)**, cash ramps, risk, QR/FX/crypto, and **mini-statement + fee-preview + PIN-format** all pass (`npm test`, **155 tests**). DB-backed integration cases are documented in `test/README.md`.
+- **Payment requests (POS / QR / push)** — `POST /payment-requests` raises a request for one sale, tied to the merchant's own `saleRef` (unique per merchant, so a POS retry never opens a second request). Open requests show a QR any Axo customer can pay; targeted ones are pushed to one customer. The customer pays from their own session with a PIN; the request is marked paid and both ledgers post in **one** serializable transaction with a compare-and-set, so it settles exactly once under retries and races. Full guide: [`docs/POS-API.md`](../docs/POS-API.md).
+- **Merchant notifications** — a **transactional outbox**: `payment.succeeded` / `payment.refunded` / `payment_request.cancelled` events are written in the same DB transaction as the money movement, then delivered to the merchant's registered endpoints with an HMAC-SHA256 signature over `timestamp.body` (5-minute replay window) and retries with backoff. Plus a best-effort WhatsApp message to the owner/managers.
+- **POS API keys** — `POST /api-keys` (owner, signed in as a person) mints a hashed machine key with a fixed `cashier`/`manager` role; `requireRole` applies to it exactly as to staff.
+- **Daily settlement report** — `GET /reports/settlement?date=` gives gross / refunds / fees / net / payouts / closing balance, plus a cross-ledger check that every Axo payment and refund has its matching, balanced customer-side leg.
+- **Tests** — money math, ledger invariants, invoice logic, reconciliation, batch validation, P2P limits/legs/service, WhatsApp signature/de-dup/intent/OTP (pay-Till/Paybill, send-to-phone, claim/recall, setpin, mini), **claimable transfers (claim-by-number, claim-by-identity, re-point)**, cash ramps, risk, QR/FX/crypto, and **mini-statement + fee-preview + PIN-format** all pass (`npm test`). **211 tests**, of which 40 run over HTTP against a real Postgres (`test/c2m.e2e.test.ts`, `test/payment-requests.e2e.test.ts`) and are skipped when no database is reachable.
 
 ## Run it
 
@@ -55,10 +59,11 @@ TypeScript · Fastify · PostgreSQL (Prisma) · Redis-ready · Vitest.
 cp .env.example .env            # fill in secrets
 docker compose up -d            # Postgres + Redis
 npm install
-npm run prisma:migrate          # create the schema
+npm run prisma:migrate          # create the schema (dev); use prisma:deploy elsewhere
 npm run seed                    # demo merchant: owner@java.test / password123
 npm run dev                     # http://localhost:4000/health
-npm test                        # unit tests (no services needed)
+npm test                        # unit tests + DB e2e tests (skipped without Postgres)
+npm run build && npm start      # production build → dist/server.js
 ```
 
 ## Try the money path (sandbox)
@@ -103,47 +108,66 @@ curl -s localhost:4000/webhooks/whatsapp -H "content-type: application/json" \
 #    -> money lands in the merchant's Axo balance; it shows in merchant statements.
 ```
 
-## API & webhook reference (Phase 6)
+## Security model
+
+Who can move whose money:
+
+| Caller | Credential | Can |
+|---|---|---|
+| Customer | customer JWT (`/customer/auth/login` with Axo tag + PIN) | Act on **their own** wallet only. Every debit re-checks the PIN (step-up). |
+| Merchant staff | staff JWT (`/auth/login`), role-gated | Act on **their own business's** balance only. Can't debit any customer. |
+| POS / back office | `X-Api-Key` (hashed, fixed role, never owner) | Raise and read payment requests for its business. |
+| Platform operator | `X-Ops-Key` = `OPS_API_KEY` | Agents, agent float, identity-based claims. Routes refuse (503) when unset. |
+| Provider / Meta | HMAC over the raw body | Confirm charges, ramps, inbound WhatsApp. Replays are de-duplicated. |
+
+In `APP_ENV=live` the process **refuses to start** with missing or public-default secrets (`liveConfigProblems` in `src/config/env.ts`). The sandbox charge provider and sandbox ramp aren't registered in live, and billers refuse in live (no biller provider is integrated).
+
+## API reference
+
+POS integration and webhooks: [`docs/POS-API.md`](../docs/POS-API.md).
 
 | Method | Path | Auth | Notes |
 |---|---|---|---|
-| `POST` | `/payments/customer` | merchant JWT + `Idempotency-Key` | A customer pays this business; credits merchant `axo_balance`. |
-| `GET`  | `/customers` | owner/accountant JWT | Wallet-holder monitoring (admin). |
-| `GET`  | `/webhooks/whatsapp` | verify token | Meta subscription handshake. |
-| `POST` | `/webhooks/whatsapp` | HMAC signature | Inbound messages; signature-verified + de-duped. |
-| `GET`  | `/ramps` | owner/accountant JWT | Ramp provider connection status (which are configured). |
-| `POST` | `/cash/in` | merchant JWT + `Idempotency-Key` | Start a cash-in; 503 `ramp_unavailable` if none configured. |
-| `POST` | `/cash/out` | merchant JWT + `Idempotency-Key` | Start a cash-out; reserves funds, debits on webhook. |
-| `POST` | `/webhooks/ramp/:provider` | adapter signature | Ramp confirmation; the only place a cash movement posts. |
-| `GET`  | `/risk/cases` | owner/accountant JWT | Compliance case queue (filter by `status`). |
-| `POST` | `/risk/customers/:id/freeze` | owner JWT | Freeze an account (opens a case). |
-| `POST` | `/risk/cases/:caseId/release` | owner JWT (≠ freezer) | Release a freeze — maker-checker enforced. |
-| `POST` | `/risk/cases/:caseId/resolve` | owner/accountant JWT | Clear or confirm a transaction case. |
-| `POST` | `/risk/report` | any JWT | File a fraud report (opens a case). |
-| `POST` | `/risk/denylist` | owner JWT | Add a sanctions/fraud denylist entry. |
-| `GET`  | `/collect/qr` | merchant JWT | Build a scannable `axo://pay?…` QR for the business's Till/Paybill. |
-| `POST` | `/collect/push` | merchant JWT | STK-style push-to-pay: send a pay prompt (no money moves). |
-| `POST` | `/collect/push/:ref/approve` | customer/approval | Approve a push → runs the payment. |
-| `POST` | `/collect/scan` | JWT | A scanned QR → a push the customer then approves. |
-| `POST` | `/global/quote` | JWT | Cross-border FX quote (spread disclosed). |
-| `POST` | `/global/send` | owner/accountant JWT + `Idempotency-Key` | Send globally via a ramp (crypto / bank / agent). |
-| `POST` | `/transfers/to-phone` | JWT + `Idempotency-Key` | Send to any phone (registered or not); recipient claims. |
-| `POST` | `/claims/:code/claim` | recipient | Claim a send-to-unregistered. |
-| `POST` | `/claims/:code/claim-by-identity` | JWT (verified) | Claim a pending send to a recovered account (lost phone / new number). |
-| `POST` | `/claims/repoint` | JWT (verified) | Re-point unclaimed money from an old number to a new one. |
-| `POST` | `/claims/:code/recall` | JWT | Recall an unclaimed send. |
-| `POST` | `/transfers/:id/reverse` | JWT | Reverse a completed Axo-to-Axo transfer (within window). |
-| `POST` | `/agents` | owner JWT | Register an agent (Axo's cash network). |
-| `POST` | `/agents/:code/float` | owner/accountant JWT | Top up an agent's float. |
-| `POST` | `/agents/:code/cash-in` | JWT + `Idempotency-Key` | Customer gives cash → wallet credited from float. |
-| `POST` | `/agents/:code/cash-out` | JWT + `Idempotency-Key` | Agent pays cash → wallet debited, float up. |
-| `GET`  | `/agents/:code` | JWT | Agent float, commission, recent activity. |
-
-Programmatic P2P is exposed through the service (`sendP2P`) and the WhatsApp router; a customer-facing JWT surface for direct `POST /transfers` is the small remaining wiring noted below.
+| `POST` | `/merchants` | public | Onboard a business + owner + ledger accounts. |
+| `POST` | `/auth/login`, `/auth/refresh` | public | Staff login. |
+| `POST` | `/paynumbers` | owner | Issue a Till / Paybill / Pay-ID. |
+| `POST` | `/payment-requests` | owner/manager/cashier or API key | Raise a request for a sale (open QR or targeted push). |
+| `GET`  | `/payment-requests`, `/payment-requests/:id` | staff or API key | Status for POS polling / dashboard. Cashiers see their own. |
+| `POST` | `/payment-requests/:id/cancel` | owner/manager/cashier | Void a pending request. |
+| `POST` | `/collect/push` | owner/manager/cashier | Back-compat alias for a targeted request. |
+| `GET`  | `/collect/qr` | staff | Static QR for a Till/Paybill. |
+| `GET`  | `/transactions?since=` | staff | Transactions feed (poll with `since`). |
+| `POST` | `/transactions/:id/refund` | owner/accountant + `Idempotency-Key` | Full or partial refund to the customer's wallet. |
+| `GET`  | `/reports/settlement?date=` | owner/manager/accountant | Daily settlement + cross-ledger reconciliation. |
+| `POST`/`GET` | `/api-keys`, `/api-keys/:id/revoke` | owner (person) | POS keys. |
+| `POST`/`GET` | `/webhook-endpoints`, `/webhook-endpoints/:id/disable` | owner (person) | Webhook endpoints. |
+| `GET`  | `/webhook-deliveries` | owner/manager | Delivery status. |
+| `POST` | `/payments/to-customer` | owner/manager/accountant + `Idempotency-Key` | Business pays a customer from its own balance. |
+| `POST` | `/charges`, `/webhooks/:provider` | staff / provider HMAC | External-rail charge (sandbox provider only, until a live rail is integrated). |
+| `POST` | `/customer/auth/login`, `/customer/auth/refresh` | public | Customer login (tag + PIN). |
+| `GET`  | `/customer/me`, `/customer/transfers` | customer | Wallet + history. |
+| `POST` | `/customer/scan` | customer | Resolve any Axo QR (request, Till, Paybill). Never charges. |
+| `GET`  | `/customer/payment-requests[/:ref]` | customer | Pushed requests / one request. |
+| `POST` | `/customer/payment-requests/:ref/pay` | customer + PIN | Pay a request — exactly once. |
+| `POST` | `/customer/payment-requests/:ref/decline` | customer | Decline a pushed request. |
+| `POST` | `/customer/pay-numbers/resolve`, `/customer/payments/by-number` | customer (+ PIN, `Idempotency-Key`) | Pay a Till/Paybill. |
+| `POST` | `/customer/transfers/to-phone` | customer + PIN + `Idempotency-Key` | Send to any phone; recipient claims. |
+| `POST` | `/customer/transfers/:id/reverse` | customer + PIN | Reverse own P2P send (never a payment to a business). |
+| `POST` | `/customer/claims/:code/recall` | customer | Recall own unclaimed send. |
+| `POST` | `/customer/cash/in`, `/customer/cash/out` | customer (+ PIN for out) + `Idempotency-Key` | Ramp funding / withdrawal. |
+| `POST` | `/customer/agents/:code/withdraw` | customer + PIN + `Idempotency-Key` | Cash out at an agent. |
+| `GET`/`POST` | `/webhooks/whatsapp` | verify token / HMAC | Meta handshake + inbound messages. |
+| `POST` | `/webhooks/ramp/:provider` | adapter HMAC | Ramp confirmation — the only place a cash movement posts. |
+| `GET`  | `/ramps` | owner/accountant | Ramp connection status. |
+| `POST` | `/agents`, `/agents/:code/float`, `/agents/:code/cash-in`, `GET /agents/:code` | `X-Ops-Key` | Agent network operations. |
+| `POST` | `/claims/:code/claim`, `/claims/:code/claim-by-identity`, `/claims/repoint` | `X-Ops-Key` | Operator claim tools. |
+| — | `/risk/*`, `/invoices*`, `/payouts*`, `/batches*`, `/settlements/import`, `/reconciliation*`, `/global/*` | staff, role-gated | Unchanged; see the module sources. |
 
 ## What is NOT built yet
 
-- **Customer-facing auth surface** — the WhatsApp session is the auth path for customers today; a standalone customer JWT/`POST /transfers` endpoint is a thin add on top of `sendP2P`.
+- **Customer P2P over HTTP** — `/customer/*` covers paying businesses, send-to-phone, reverse, recall and cash; a direct `POST /customer/transfers` (send to a @tag) over `sendP2P` is still WhatsApp-only.
+- **Wallet frontend wiring** — the pages in `frontend/` are demo data only and make no API calls yet; the `/customer/*` routes are what they should call.
+- **Branches / tills / shifts**, staff invites, merchant fees (MDR), MFA, audit-log writes, rate limiting, metrics.
 - **Cross-currency / cross-border P2P** — deliberately refused until a provider FX route is wired (the adapter layer is ready for it).
 - **Live ramp adapters** — the ramp interface, registry, sandbox, and an M-Pesa (Daraja) adapter *template* are built and tested; wiring the template to live STK push / B2C (and adding bank / agent adapters) needs real partner credentials (see below).
 - **Still from earlier phases:** bills/airtime, credit, crypto custody, and the full admin console UI. (Disputes/fraud now have a server-side case model via `RiskCase` + `/risk/report`; a richer per-case event timeline and SLA routing is the next refinement.)
@@ -170,7 +194,8 @@ src/
   db/client.ts            Prisma + serializable transactions
   lib/money.ts            minor-unit math (no floats)
   middleware/
-    auth.ts               JWT + requireRole (server-enforced)
+    auth.ts               staff JWT / API key, customer JWT, requireRole
+    ops.ts                X-Ops-Key platform-operator gate
     idempotency.ts        Idempotency-Key handling
   modules/
     auth/                 login, refresh, hashing
@@ -184,7 +209,7 @@ src/
     p2p/                  customer wallets, Axo-to-Axo send, customer-pays-business
       p2p.lib.ts          pure: quote, limit/status checks, legs (DB-free, tested)
       p2p.service.ts      sendP2P + payMerchant (both ledgers, serializable)
-      p2p.routes.ts       POST /payments/customer, GET /customers
+      p2p.routes.ts       GET /customers
     whatsapp/             the WhatsApp money gateway
       whatsapp.lib.ts     pure: subscription verify, HMAC verify, extract, parseIntent
       whatsapp.service.ts OTP issue/verify, link + step-up session, webhook de-dup
@@ -194,9 +219,13 @@ src/
       cash.service.ts     startCashIn, startCashOut (reserve), applyRampWebhook
       cash.routes.ts      /cash/in, /cash/out, /ramps, /webhooks/ramp/:provider
     collect/              QR + STK-style push-to-pay
-      collect.lib.ts      pure: QR encode/parse, push ref (tested)
-      collect.service.ts  pushPrompt, approvePush, resolveQrToPush
-      collect.routes.ts   /collect/qr, /collect/push(+approve/decline), /collect/scan
+      collect.lib.ts      pure: QR encode/parse incl. request refs (tested)
+      collect.service.ts  payment requests: create, pay (exactly once), decline, cancel
+      collect.routes.ts   /payment-requests*, /collect/qr, /collect/push
+    customer/             customer-token surface (/customer/*)
+    notify/               transactional outbox + signed webhooks, merchant WhatsApp
+    reports/              daily settlement + cross-ledger reconciliation
+    merchants/            onboarding, pay numbers, API keys, webhook endpoints
     global/               crypto receive + cross-border send
       fx.lib.ts           pure: integer-safe FX quote with disclosed spread (tested)
       global.routes.ts    /global/quote, /global/send

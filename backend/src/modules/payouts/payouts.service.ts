@@ -2,6 +2,8 @@ import type { PrismaClient } from '@prisma/client';
 import { prisma, inTransaction } from '../../db/client.js';
 import { postLedger } from '../ledger/ledger.service.js';
 import { getProvider } from '../payments/payments.service.js';
+import { postCustomerLedger } from '../p2p/p2p.service.js';
+import { enqueueMerchantEvent } from '../notify/outbox.service.js';
 
 async function accounts(merchantId: string, currency: string, tx: PrismaClient) {
   const balance = await tx.account.upsert({
@@ -114,41 +116,103 @@ export async function approveAndExecutePayout(input: {
 }
 
 /**
- * Refund a confirmed payment_in. Posts a NEW linked transaction + entries that
- * move the amount back out. The original is never edited; it stays confirmed and
- * the refund references it.
+ * Refund a confirmed payment_in — in full, or in part.
+ *
+ * Never edits the original's amount or entries: it posts a NEW linked refund
+ * transaction and raises the original's refundedMinor, which can never pass the
+ * amount paid. That cap, checked inside a serializable transaction with a
+ * compare-and-set on refundedMinor, is what stops a payment being refunded twice
+ * (the old version left the original untouched, so every new idempotency key
+ * refunded it again).
+ *
+ * For an Axo-wallet payment the money goes back to the customer's wallet on the
+ * customer ledger in the same transaction. A payment that came in over an
+ * external rail would need that rail's refund API, which no adapter has yet, so
+ * it is refused rather than debited into a void.
  */
-export async function refundPayment(input: { transactionId: string; merchantId: string }) {
+export async function refundPayment(input: { transactionId: string; merchantId: string; amountMinor?: bigint; actorId?: string; reason?: string }) {
   return inTransaction(async (tx) => {
-    const original = await tx.transaction.findFirstOrThrow({
+    const original = await tx.transaction.findFirst({
       where: { id: input.transactionId, merchantId: input.merchantId },
     });
+    if (!original) throw new Error('not_found');
     if (original.type !== 'payment_in' || original.status !== 'confirmed') {
       throw new Error('only a confirmed payment can be refunded');
     }
-    const { balance, clearing } = await accounts(original.merchantId, original.currency, tx);
-    if (balance.balanceMinor < original.amountMinor) throw new Error('insufficient_balance');
+    if (!original.transferId) throw new Error('refund_not_supported_for_this_rail');
 
+    const remaining = original.amountMinor - original.refundedMinor;
+    const amount = input.amountMinor ?? remaining;
+    if (amount <= 0n) throw new Error(remaining <= 0n ? 'already_fully_refunded' : 'bad_amount');
+    if (amount > remaining) throw new Error('refund_exceeds_remaining');
+
+    const { balance, clearing } = await accounts(original.merchantId, original.currency, tx);
+    if (balance.balanceMinor < amount) throw new Error('insufficient_balance');
+
+    const raised = await tx.transaction.updateMany({
+      where: { id: original.id, refundedMinor: original.refundedMinor },
+      data: { refundedMinor: { increment: amount } },
+    });
+    if (raised.count !== 1) throw new Error('refund was processed concurrently — retry');
+
+    // The customer who paid is the sender of the linked customer-side transfer.
+    const paid = await tx.p2PTransfer.findUniqueOrThrow({ where: { id: original.transferId } });
+    const customer = await tx.customer.findUniqueOrThrow({ where: { id: paid.senderId }, include: { wallet: true } });
+    if (!customer.wallet) throw new Error('wallet_missing');
+    const clearingCustomer = await tx.customer.findUniqueOrThrow({ where: { id: paid.recipientId }, include: { wallet: true } });
+
+    // Customer side: clearing → wallet.
+    const back = await tx.p2PTransfer.create({
+      data: {
+        senderId: clearingCustomer.id,
+        recipientId: customer.id,
+        amountMinor: amount,
+        feeMinor: 0n,
+        currency: original.currency,
+        status: 'completed',
+        note: 'refund' + (input.reason ? ' · ' + input.reason : ''),
+        reversesId: paid.id,
+        completedAt: new Date(),
+      },
+    });
+    await postCustomerLedger(tx, back.id, [
+      { accountId: clearingCustomer.wallet!.id, direction: 'debit', amountMinor: amount, currency: original.currency },
+      { accountId: customer.wallet.id, direction: 'credit', amountMinor: amount, currency: original.currency },
+    ]);
+
+    // Merchant side: balance → clearing.
     const refund = await tx.transaction.create({
       data: {
         merchantId: original.merchantId,
         type: 'refund',
         status: 'confirmed',
-        amountMinor: original.amountMinor,
+        amountMinor: amount,
         currency: original.currency,
         provider: original.provider,
         reversesId: original.id,
+        transferId: back.id,
+        customerRef: original.customerRef,
+        makerId: input.actorId,
         confirmedAt: new Date(),
       },
     });
     await postLedger(
       refund.id,
       [
-        { accountId: balance.id, direction: 'debit', amountMinor: original.amountMinor, currency: original.currency },
-        { accountId: clearing.id, direction: 'credit', amountMinor: original.amountMinor, currency: original.currency },
+        { accountId: balance.id, direction: 'debit', amountMinor: amount, currency: original.currency },
+        { accountId: clearing.id, direction: 'credit', amountMinor: amount, currency: original.currency },
       ],
       tx,
     );
-    return refund;
+
+    await enqueueMerchantEvent(tx, original.merchantId, 'payment.refunded', {
+      refundTransactionId: refund.id,
+      transactionId: original.id,
+      amountMinor: amount,
+      refundedTotalMinor: original.refundedMinor + amount,
+      currency: original.currency,
+      reason: input.reason ?? null,
+    });
+    return { refund, customerId: customer.id, refundedTotalMinor: original.refundedMinor + amount };
   });
 }

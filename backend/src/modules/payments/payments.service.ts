@@ -3,15 +3,21 @@ import { prisma, inTransaction } from '../../db/client.js';
 import { postLedger } from '../ledger/ledger.service.js';
 import { sandboxProvider } from '../../providers/sandbox.js';
 import type { PaymentProvider } from '../../providers/types.js';
+import { isLive } from '../../config/env.js';
 
-// Phase 1+2 ships the sandbox provider. Live adapters register here by name.
-const providers: Record<string, PaymentProvider> = {
-  sandbox: sandboxProvider,
-  axo: sandboxProvider, // Axo-to-Axo uses the same confirm path in sandbox
-};
+// Live adapters register here by name. The sandbox provider signs its webhooks
+// with a secret that exists only for development, so it is never registered in
+// live — otherwise anyone holding that secret could confirm a charge that no
+// money ever backed. Axo-to-Axo payments don't go through this table at all:
+// they settle on Axo's own ledger in p2p.service (payMerchant).
+const providers: Record<string, PaymentProvider> = isLive ? {} : { sandbox: sandboxProvider };
+
+export function findProvider(name: string): PaymentProvider | undefined {
+  return Object.prototype.hasOwnProperty.call(providers, name) ? providers[name] : undefined;
+}
 
 export function getProvider(name: string): PaymentProvider {
-  const p = providers[name];
+  const p = findProvider(name);
   if (!p) throw new Error(`unknown provider: ${name}`);
   return p;
 }
@@ -42,7 +48,7 @@ export async function createCharge(input: {
   customerRef: string;
   provider?: string;
 }) {
-  const providerName = input.provider ?? 'axo';
+  const providerName = input.provider ?? 'sandbox';
   const provider = getProvider(providerName);
 
   const txn = await prisma.transaction.create({

@@ -2,6 +2,7 @@ import type { PrismaClient } from '@prisma/client';
 import { inTransaction } from '../../db/client.js';
 import { postCustomerLedger } from '../p2p/p2p.service.js';
 import crypto from 'node:crypto';
+import { isLive } from '../../config/env.js';
 
 /** The platform clearing wallet (shared with p2p/cash/agent). */
 async function clearingWallet(tx: PrismaClient, currency: string) {
@@ -39,6 +40,10 @@ export async function buyBiller(params: {
   idempotencyKey?: string;
 }) {
   if (params.amountMinor <= 0n) throw new Error('amount must be positive');
+  // No biller aggregator is integrated. The sandbox below debits the wallet and
+  // invents an electricity token, which is fine for a demo and unacceptable with
+  // real money — so in live it refuses until a real biller provider is wired in.
+  if (isLive) throw new Error('bill payments are not available yet');
   return inTransaction(async (tx) => {
     if (params.idempotencyKey) {
       const existing = await tx.billerPurchase.findUnique({ where: { idempotencyKey: params.idempotencyKey } });

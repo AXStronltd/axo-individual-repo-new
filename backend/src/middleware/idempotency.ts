@@ -15,11 +15,15 @@ export async function beginIdempotent(
   reply: FastifyReply,
   endpoint: string,
 ): Promise<{ key: string; replay?: unknown } | null> {
-  const key = (req.headers['idempotency-key'] as string | undefined)?.trim();
-  if (!key) {
+  const raw = (req.headers['idempotency-key'] as string | undefined)?.trim();
+  if (!raw) {
     reply.code(400).send({ error: 'missing_idempotency_key' });
     return null;
   }
+  // Keys are chosen by clients, so they are scoped to the caller's merchant and
+  // the endpoint: one business can never replay — and so read — another's
+  // stored response by sending the same key.
+  const key = `${req.auth?.merchantId ?? 'anon'}:${endpoint}:${raw}`;
   const existing = await prisma.idempotencyKey.findUnique({ where: { key } });
   if (existing) {
     return { key, replay: JSON.parse(existing.responseJson) };

@@ -4,7 +4,7 @@ import { prisma } from '../../db/client.js';
 import { requireAuth, requireRole } from '../../middleware/auth.js';
 import { beginIdempotent, finishIdempotent } from '../../middleware/idempotency.js';
 import { bigintReplacer } from '../../lib/money.js';
-import { createCharge, confirmChargeFromWebhook, getProvider } from './payments.service.js';
+import { createCharge, confirmChargeFromWebhook, findProvider } from './payments.service.js';
 
 const chargeSchema = z.object({
   amountMinor: z.union([z.string(), z.number()]),
@@ -25,6 +25,10 @@ export async function paymentRoutes(app: FastifyInstance) {
 
       const parsed = chargeSchema.safeParse(req.body);
       if (!parsed.success) return reply.code(400).send({ error: 'invalid_body' });
+      // No configured rail is a real answer, not a 500 — and never a faked charge.
+      if (!findProvider(parsed.data.provider ?? 'sandbox')) {
+        return reply.code(503).send({ error: 'provider_unavailable' });
+      }
 
       const txn = await createCharge({
         merchantId: req.auth!.merchantId,
@@ -57,13 +61,18 @@ export async function paymentRoutes(app: FastifyInstance) {
   // signature the provider adapter verifies — never from the caller's session.
   app.post('/webhooks/:provider', async (req, reply) => {
     const { provider } = req.params as { provider: string };
-    const raw = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
+    const adapter = findProvider(provider);
+    if (!adapter) return reply.code(404).send({ error: 'unknown_provider' });
+    // Verify over the exact bytes received (kept by the parser in app.ts). A
+    // re-serialised body can differ in key order or whitespace from what the
+    // provider signed.
+    const raw: string = (req as any).rawBody ?? '';
     const headers: Record<string, string> = {};
     for (const [k, v] of Object.entries(req.headers)) {
       if (typeof v === 'string') headers[k.toLowerCase()] = v;
     }
 
-    const parsed = getProvider(provider).parseWebhook(headers, raw);
+    const parsed = adapter.parseWebhook(headers, raw);
     if (!parsed.valid) return reply.code(401).send({ error: 'bad_signature' });
 
     const result = await confirmChargeFromWebhook({

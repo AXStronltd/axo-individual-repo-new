@@ -1,29 +1,9 @@
 import type { FastifyInstance } from 'fastify';
-import { z } from 'zod';
 import { requireAuth, requireRole } from '../../middleware/auth.js';
 import { bigintReplacer } from '../../lib/money.js';
-import { startCashIn, startCashOut, applyRampWebhook } from './cash.service.js';
+import { applyRampWebhook } from './cash.service.js';
 import { rampStatus, allRamps } from '../../providers/ramp.registry.js';
 import { prisma } from '../../db/client.js';
-
-const inBody = z.object({
-  customerId: z.string().min(1),
-  amountMinor: z.union([z.string(), z.number()]),
-  currency: z.string().length(3),
-  source: z.string().min(1),
-  provider: z.string().optional(),
-});
-const outBody = z.object({
-  customerId: z.string().min(1),
-  amountMinor: z.union([z.string(), z.number()]),
-  currency: z.string().length(3),
-  destination: z.string().min(1),
-  provider: z.string().optional(),
-});
-
-function toBig(v: string | number): bigint | null {
-  try { return BigInt(v); } catch { return null; }
-}
 
 export async function cashRoutes(app: FastifyInstance) {
   // Raw body for ramp webhook HMAC is preserved by the global parser in app.ts.
@@ -33,36 +13,10 @@ export async function cashRoutes(app: FastifyInstance) {
     return reply.send(rampStatus());
   });
 
-  // Start a cash-in. Idempotency-Key required. Returns 'unavailable' (not a fake
-  // success) when no configured ramp supports the country/currency.
-  app.post('/cash/in', { preHandler: [requireAuth, requireRole('owner', 'manager', 'cashier', 'accountant')] }, async (req, reply) => {
-    const parsed = inBody.safeParse(req.body);
-    if (!parsed.success) return reply.code(400).send({ error: 'invalid_body' });
-    const key = req.headers['idempotency-key'] as string | undefined;
-    if (!key) return reply.code(400).send({ error: 'missing_idempotency_key' });
-    const amt = toBig(parsed.data.amountMinor);
-    if (amt === null) return reply.code(400).send({ error: 'bad_amount' });
-    try {
-      const r = await startCashIn({ customerId: parsed.data.customerId, amountMinor: amt, currency: parsed.data.currency, source: parsed.data.source, idempotencyKey: key, providerName: parsed.data.provider });
-      if (r.status === 'unavailable') return reply.code(503).send({ error: 'ramp_unavailable', reason: r.reason });
-      return reply.code(201).send(JSON.parse(JSON.stringify(r, bigintReplacer)));
-    } catch (e) { return reply.code(409).send({ error: (e as Error).message }); }
-  });
-
-  // Start a cash-out. Funds are reserved immediately; debit applied on webhook.
-  app.post('/cash/out', { preHandler: [requireAuth, requireRole('owner', 'manager', 'accountant')] }, async (req, reply) => {
-    const parsed = outBody.safeParse(req.body);
-    if (!parsed.success) return reply.code(400).send({ error: 'invalid_body' });
-    const key = req.headers['idempotency-key'] as string | undefined;
-    if (!key) return reply.code(400).send({ error: 'missing_idempotency_key' });
-    const amt = toBig(parsed.data.amountMinor);
-    if (amt === null) return reply.code(400).send({ error: 'bad_amount' });
-    try {
-      const r = await startCashOut({ customerId: parsed.data.customerId, amountMinor: amt, currency: parsed.data.currency, destination: parsed.data.destination, idempotencyKey: key, providerName: parsed.data.provider });
-      if (r.status === 'unavailable') return reply.code(503).send({ error: 'ramp_unavailable', reason: r.reason });
-      return reply.code(201).send(JSON.parse(JSON.stringify(r, bigintReplacer)));
-    } catch (e) { return reply.code(409).send({ error: (e as Error).message }); }
-  });
+  // Cash-in and cash-out are started by the CUSTOMER (POST /customer/cash/in and
+  // /customer/cash/out in customer.routes.ts). They used to be here under any
+  // merchant token with the customer named in the body — which let a business's
+  // staff withdraw any customer's wallet to any destination.
 
   // Ramp webhook: verify signature via the named provider's adapter, de-dup on
   // the event id, then apply. A request alone never moved money; this does.

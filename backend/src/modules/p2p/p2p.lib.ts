@@ -133,3 +133,11 @@ export function normalizeWaId(input: string): string | null {
   if (digits.length < 7 || digits.length > 15) return null;
   return digits;
 }
+
+/** The tag prefix of the platform's internal clearing wallets (one per currency). */
+export const CLEARING_TAG_PREFIX = '@axo_clearing';
+
+/** Is this the internal clearing wallet rather than a real person? */
+export function isClearingTag(tag: string): boolean {
+  return tag.startsWith(CLEARING_TAG_PREFIX);
+}

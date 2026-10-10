@@ -16,7 +16,7 @@ import {
 } from './whatsapp.service.js';
 import { makeSender } from './whatsapp.sender.js';
 import { sendP2P, payByNumber } from '../p2p/p2p.service.js';
-import { approvePush, declinePush } from '../collect/collect.service.js';
+import { payPaymentRequest, declinePaymentRequest } from '../collect/collect.service.js';
 import { sendToUnregistered, refundClaimable, claimTransfer, claimByIdentity } from '../p2p/claim.service.js';
 import { setPin, hasPin } from '../p2p/pin.service.js';
 import { formatMiniStatement } from '../p2p/statement.lib.js';
@@ -27,9 +27,10 @@ import { agentCashOut } from '../agent/agent.service.js';
 import { buyBiller } from '../billers/billers.service.js';
 import { reverseTransfer } from '../p2p/reversal.service.js';
 import { verifyPin } from '../p2p/pin.service.js';
-import { normalizeTag, normalizeWaId } from '../p2p/p2p.lib.js';
+import { normalizeTag, normalizeWaId, CLEARING_TAG_PREFIX } from '../p2p/p2p.lib.js';
 import { prisma } from '../../db/client.js';
 import { formatMinor } from '../../lib/money.js';
+import { notifyMerchantPaid } from '../notify/merchant.notify.js';
 
 const sender = makeSender();
 
@@ -103,7 +104,10 @@ async function routeMessage(waId: string, text: string) {
     return;
   }
 
-  if (intent.kind === 'verify') {
+  // A bare code is ambiguous: it is an OTP during sign-up, but a PIN when a
+  // payment is waiting to be confirmed. The pending confirmation wins, so it is
+  // left to the confirm block below instead of being checked as an OTP.
+  if (intent.kind === 'verify' && !(customer && (await hasPendingConfirm(waId)))) {
     const res = await verifyOtp(waId, 'link', intent.code);
     if (!res.ok) return reply_safe(waId, res.reason === 'expired' ? 'That code expired. Reply REGISTER to get a new one.' : 'That code is not right. Try again.');
     let c = await customerForWaId(waId);
@@ -145,7 +149,16 @@ async function routeMessage(waId: string, text: string) {
   // A staged money action awaiting confirmation takes PRIORITY: a PIN, a bare
   // code, or YES confirms it; NO cancels. This is the "enter PIN to pay" step.
   if (await hasPendingConfirm(waId)) {
-    if (intent.kind === 'cancel') { await cancelConfirm(waId); return reply_safe(waId, 'Cancelled. Nothing was sent.'); }
+    if (intent.kind === 'cancel') {
+      const staged = await prisma.pendingConfirm.findUnique({ where: { waId } });
+      await cancelConfirm(waId);
+      // NO to a business's payment request also declines the request itself.
+      if (staged?.action === 'approve_push' && staged.number) {
+        await declinePaymentRequest({ ref: staged.number, customerId: customer.id });
+        return reply_safe(waId, 'Declined. Nothing was charged.');
+      }
+      return reply_safe(waId, 'Cancelled. Nothing was sent.');
+    }
     if (intent.kind === 'pin' || intent.kind === 'verify' || intent.kind === 'confirm') {
       const secret = intent.kind === 'pin' ? intent.pin : intent.kind === 'verify' ? intent.code : 'YES';
       const r = await resolveConfirm(waId, customer.id, secret);
@@ -163,15 +176,20 @@ async function routeMessage(waId: string, text: string) {
     return reply_safe(waId, 'You have a payment waiting. Reply with your PIN (or YES) to confirm, or NO to cancel.');
   }
 
-  // Approve / decline a pending STK-style push with YES / NO.
+  // YES / NO to a business's payment request whose confirmation step lapsed
+  // (the request itself may still be open). Approval always goes back through
+  // the PIN confirmation — a bare YES never pays a business on its own.
   if (intent.kind === 'confirm' || intent.kind === 'cancel') {
-    const pending = await prisma.pushPrompt.findFirst({ where: { customerId: customer.id, status: 'pending' }, orderBy: { createdAt: 'desc' } });
+    const pending = await prisma.pushPrompt.findFirst({
+      where: { customerId: customer.id, status: 'pending', expiresAt: { gt: new Date() } },
+      orderBy: { createdAt: 'desc' },
+    });
     if (!pending) return reply_safe(waId, intent.kind === 'confirm' ? 'Nothing to approve right now.' : 'Nothing to cancel.');
-    if (intent.kind === 'cancel') { await declinePush(pending.ref); return reply_safe(waId, 'Declined. Nothing was charged.'); }
-    if (!(await hasLiveSession(waId))) return reply_safe(waId, 'Please verify again before approving. Reply REGISTER.');
-    const r = await approvePush(pending.ref);
-    if (r.status === 'approved') return reply_safe(waId, `✅ Approved — ${customer.currency} ${formatMinor(pending.amountMinor, 0)} paid.`);
-    return reply_safe(waId, `Couldn't approve: ${('reason' in r && r.reason) || 'try again'}.`);
+    if (intent.kind === 'cancel') { await declinePaymentRequest({ ref: pending.ref, customerId: customer.id }); return reply_safe(waId, 'Declined. Nothing was charged.'); }
+    const merchant = await prisma.merchant.findUnique({ where: { id: pending.merchantId } });
+    const summary = `Pay ${formatAmount(pending.amountMinor, pending.currency)} to ${merchant?.tradingName ?? 'the business'}`;
+    await stageConfirm({ waId, action: 'approve_push', amountMinor: pending.amountMinor, currency: pending.currency, summary, number: pending.ref });
+    return reply_safe(waId, confirmPrompt(summary, await hasPin(customer.id)));
   }
 
   if (intent.kind === 'balance') {
@@ -208,7 +226,7 @@ async function routeMessage(waId: string, text: string) {
   }
 
   if (intent.kind === 'recall') {
-    const r = await refundClaimable({ code: intent.code, by: 'sender' });
+    const r = await refundClaimable({ code: intent.code, by: 'sender', senderId: customer.id });
     return reply_safe(waId, r.ok ? `↩️ Recalled — ${intent.code} refunded to your balance.` : `Couldn't recall ${intent.code}: ${r.reason}.`);
   }
 
@@ -278,7 +296,12 @@ async function routeMessage(waId: string, text: string) {
 
   // REVERSE a completed send (within the window).
   if (intent.kind === 'reverse_txn') {
-    const xfer = await prisma.p2PTransfer.findFirst({ where: { senderId: customer.id, status: 'completed' }, orderBy: { createdAt: 'desc' } });
+    // Only a person-to-person send can be reversed; a payment to a business is
+    // refunded by that business (see reversal.service).
+    const xfer = await prisma.p2PTransfer.findFirst({
+      where: { senderId: customer.id, status: 'completed', recipient: { axoTag: { not: { startsWith: CLEARING_TAG_PREFIX } } } },
+      orderBy: { createdAt: 'desc' },
+    });
     if (!xfer) return reply_safe(waId, 'No recent send to reverse.');
     try {
       await reverseTransfer({ transferId: xfer.id, byCustomerId: customer.id });
@@ -397,7 +420,25 @@ async function executeConfirmed(waId: string, customer: any, p: any) {
       }
       const where = kind === 'till' ? `Till ${p.number}` : `Paybill ${p.number} (a/c ${p.account})`;
       await reply_safe(waId, `✅ Paid ${formatAmount(p.amountMinor, p.currency)} to ${where}.`);
+      await notifyMerchantPaid({ merchantId: r.merchantId, amountMinor: p.amountMinor, currency: p.currency, customerId: customer.id });
     } catch (e) { return reply_safe(waId, `Couldn't pay: ${(e as Error).message}.`); }
+    return;
+  }
+  if (p.action === 'approve_push') {
+    // Without a PIN the confirmation was a bare YES — then insist on a live,
+    // recently verified session, as every other money action does.
+    if (!(await hasPin(customer.id)) && !(await hasLiveSession(waId))) {
+      return reply_safe(waId, 'For your security, please verify again before paying. Reply REGISTER.');
+    }
+    try {
+      const r = await payPaymentRequest({ ref: p.number, customerId: customer.id });
+      if (r.status === 'rejected') {
+        const why: Record<string, string> = { expired: 'that request has expired', already_paid: 'it has already been paid', request_cancelled: 'the business cancelled it', request_declined: 'it was declined' };
+        return reply_safe(waId, `Couldn't pay: ${why[r.reason] ?? r.reason}. Nothing was charged.`);
+      }
+      const wallet = await prisma.customerAccount.findUnique({ where: { customerId: customer.id } });
+      await reply_safe(waId, `✅ Paid ${formatAmount(r.amountMinor, r.currency)}. Receipt ${r.transferId.slice(0, 8).toUpperCase()}. New balance: ${formatAmount(wallet?.balanceMinor ?? 0n, r.currency)}.`);
+    } catch (e) { return reply_safe(waId, `Couldn't pay: ${(e as Error).message}. Nothing was charged.`); }
     return;
   }
   if (p.action === 'send_global') {
@@ -411,8 +452,11 @@ async function executeConfirmed(waId: string, customer: any, p: any) {
   }
   if (p.action === 'withdraw') {
     try {
-      await agentCashOut({ agentCode: p.number, customerId: customer.id, amountMinor: p.amountMinor, currency: p.currency });
-      await reply_safe(waId, `🏧 Withdraw approved. Collect ${formatAmount(p.amountMinor, p.currency)} cash from agent ${p.number}. New balance: ${formatAmount((customer.wallet?.balanceMinor ?? 0n) - p.amountMinor, p.currency)}.`);
+      await agentCashOut({ agentCode: p.number, customerId: customer.id, amountMinor: p.amountMinor });
+      // Read the balance back from the ledger rather than subtracting from a
+      // wallet snapshot taken before the posting.
+      const wallet = await prisma.customerAccount.findUnique({ where: { customerId: customer.id } });
+      await reply_safe(waId, `🏧 Withdraw approved. Collect ${formatAmount(p.amountMinor, p.currency)} cash from agent ${p.number}. New balance: ${formatAmount(wallet?.balanceMinor ?? 0n, p.currency)}.`);
     } catch (e) {
       const m = (e as Error).message;
       return reply_safe(waId, m.includes('no agent') || m.includes('not found') ? `Agent ${p.number} not found. Check the agent code.` : `Couldn't withdraw: ${m}.`);
@@ -431,7 +475,8 @@ async function executeConfirmed(waId: string, customer: any, p: any) {
     try {
       const purchase: any = await buyBiller({ customerId: customer.id, kind: p.number, target: p.account, amountMinor: p.amountMinor, currency: p.currency });
       let msg = `✅ Paid ${formatAmount(p.amountMinor, p.currency)} — ${p.number} (${p.account}).`;
-      if (purchase?.token) msg += `\n⚡ Your token: ${purchase.token}\nEnter it on your meter.`;
+      // Sandbox only (billers refuse in live): the token is made up, so say so.
+      if (purchase?.token) msg += `\n⚡ [SANDBOX — not a real token] ${purchase.token}`;
       await reply_safe(waId, msg);
     } catch (e) { return reply_safe(waId, `Couldn't pay the bill: ${(e as Error).message}.`); }
     return;
@@ -469,26 +514,29 @@ async function provisionWallet(waId: string) {
  * verify, resumePendingPay finishes the payment automatically.
  */
 async function startPayOnboarding(waId: string, intent: any) {
-  const amountMinor = BigInt(Math.round(parseFloat(intent.amount ?? '0') * 1));
+  // The wallet that will be created is in the currency of the number's country,
+  // so the amount is read in that currency's minor units.
+  const { currency } = countryCurrencyFor(normalizeWaId(waId) ?? waId);
+  const amountMinor = intent.amount ? amountToMinor(intent.amount, currency) : null;
   if (intent.kind === 'confirm') {
     // They can't approve a push they don't have a wallet for; guide them.
     return reply_safe(waId, 'To pay with Axo, reply REGISTER first — it takes one message, no app to install.');
   }
-  if (!(amountMinor > 0n)) return reply_safe(waId, 'Tell me the amount, e.g. PAY TILL 832909 500');
+  if (amountMinor === null || amountMinor <= 0n) return reply_safe(waId, 'Tell me the amount, e.g. PAY TILL 832909 500');
   await prisma.pendingPayIntent.upsert({
     where: { waId },
     update: {
       kind: intent.kind === 'pay_till' ? 'till' : 'paybill',
       number: intent.kind === 'pay_till' ? intent.till : intent.paybill,
       account: intent.kind === 'pay_bill' ? intent.account : null,
-      amountMinor, currency: 'KES',
+      amountMinor, currency,
     },
     create: {
       waId,
       kind: intent.kind === 'pay_till' ? 'till' : 'paybill',
       number: intent.kind === 'pay_till' ? intent.till : intent.paybill,
       account: intent.kind === 'pay_bill' ? intent.account : null,
-      amountMinor, currency: 'KES',
+      amountMinor, currency,
     },
   });
   const { code } = await issueOtp(waId, 'link');
@@ -516,7 +564,7 @@ async function resumePendingPay(waId: string, customer: any): Promise<boolean> {
       return true;
     }
     const where = p.kind === 'till' ? `Till ${p.number}` : `Paybill ${p.number} (a/c ${p.account})`;
-    await reply_safe(waId, `✅ Welcome to Axo! Wallet ${customer.axoTag} created and ${p.currency} ${formatMinor(p.amountMinor, 0)} paid to ${where}.`);
+    await reply_safe(waId, `✅ Welcome to Axo! Wallet ${customer.axoTag} created and ${formatAmount(p.amountMinor, p.currency)} paid to ${where}.`);
   } catch (e) {
     await reply_safe(waId, `✅ Your Axo wallet ${customer.axoTag} is ready. Couldn't complete the payment: ${(e as Error).message}. Try again.`);
   }

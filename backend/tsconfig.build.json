@@ -1,0 +1,8 @@
+{
+  // Production build: compile only the app, rooted at src/, so the entry point
+  // lands at dist/server.js where `npm start` runs it. tsconfig.json stays the
+  // editor/typecheck config that also covers tests and the seed script.
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "rootDir": "src", "outDir": "dist" },
+  "include": ["src/**/*.ts"]
+}

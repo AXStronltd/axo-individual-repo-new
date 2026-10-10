@@ -1,5 +1,6 @@
 import { inTransaction } from '../../db/client.js';
 import { postCustomerLedger } from './p2p.service.js';
+import { isClearingTag } from './p2p.lib.js';
 
 const REVERSAL_WINDOW_MS = 10 * 60 * 1000; // a completed P2P can be recalled for 10 min
 
@@ -22,6 +23,15 @@ export async function reverseTransfer(params: { transferId: string; byCustomerId
     const sender = await tx.customer.findUniqueOrThrow({ where: { id: orig.senderId }, include: { wallet: true } });
     const recipient = await tx.customer.findUniqueOrThrow({ where: { id: orig.recipientId }, include: { wallet: true } });
     if (!sender.wallet || !recipient.wallet) throw new Error('wallet_missing');
+
+    // A transfer to or from the clearing wallet is one leg of a business payment,
+    // payout or cash movement whose other leg sits on the merchant ledger or with
+    // a provider. Reversing only this leg would hand the customer their money
+    // back while the business keeps the credit. Those are undone by a merchant
+    // refund, which moves both ledgers together.
+    if (isClearingTag(recipient.axoTag) || isClearingTag(sender.axoTag)) {
+      throw new Error('payments to a business are refunded by the business, not reversed');
+    }
 
     const recipSpendable = recipient.wallet.balanceMinor - recipient.wallet.reservedMinor;
     if (orig.amountMinor > recipSpendable) throw new Error('recipient has already spent the funds — cannot reverse automatically');

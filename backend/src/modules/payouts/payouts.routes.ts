@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { requireAuth, requireRole } from '../../middleware/auth.js';
 import { beginIdempotent, finishIdempotent } from '../../middleware/idempotency.js';
 import { bigintReplacer } from '../../lib/money.js';
+import { notifyCredit } from '../whatsapp/notify.service.js';
 import { createPayout, approveAndExecutePayout, refundPayment } from './payouts.service.js';
 
 const payoutSchema = z.object({
@@ -68,13 +69,21 @@ export async function payoutRoutes(app: FastifyInstance) {
       if (!idem) return;
       if (idem.replay !== undefined) return reply.send(idem.replay);
       const { id } = req.params as { id: string };
+      const parsed = z.object({ amountMinor: z.union([z.string(), z.number()]).optional(), reason: z.string().max(140).optional() }).safeParse(req.body ?? {});
+      if (!parsed.success) return reply.code(400).send({ error: 'invalid_body' });
+      let amountMinor: bigint | undefined;
+      if (parsed.data.amountMinor !== undefined) {
+        try { amountMinor = BigInt(parsed.data.amountMinor); } catch { return reply.code(400).send({ error: 'bad_amount' }); }
+      }
       try {
-        const refund = await refundPayment({ transactionId: id, merchantId: req.auth!.merchantId });
-        const body = JSON.parse(JSON.stringify(refund, bigintReplacer));
+        const r = await refundPayment({ transactionId: id, merchantId: req.auth!.merchantId, amountMinor, actorId: req.auth!.userId, reason: parsed.data.reason });
+        await notifyCredit({ customerId: r.customerId, amountMinor: r.refund.amountMinor, currency: r.refund.currency, from: 'a business', kind: 'refund' });
+        const body = JSON.parse(JSON.stringify(r.refund, bigintReplacer));
         await finishIdempotent(idem.key, req.auth!.merchantId, '/refund', body);
         return reply.send(body);
       } catch (e) {
-        return reply.code(409).send({ error: (e as Error).message });
+        const msg = (e as Error).message;
+        return reply.code(msg === 'not_found' ? 404 : 409).send({ error: msg });
       }
     },
   );
