@@ -42,12 +42,20 @@ d('Wallet API — send to @tag and receive QR', () => {
       ids[`${who}Tag` as 'aTag' | 'bTag'] = c.axoTag;
     }
     ids.aToken = (await app.inject({ method: 'POST', url: '/customer/auth/login', payload: { axoTag: ids.aTag, pin: PIN } })).json().accessToken;
-    // make sure a KES clearing wallet exists to aim at
-    const clearing = await prisma.customer.upsert({
-      where: { axoTag: '@axo_clearing_kes' },
-      update: {},
-      create: { axoTag: '@axo_clearing_kes', displayName: 'Axo Clearing (KES)', country: 'XX', currency: 'KES', status: 'active', kycTier: 'verified', wallet: { create: { currency: 'KES' } } },
-    });
+    // Make sure a KES clearing wallet exists to aim at. Other test files run in
+    // parallel and may be creating it for their first payment at this moment
+    // (on a fresh CI database), so a unique-key clash means "it exists now".
+    let clearing = await prisma.customer.findUnique({ where: { axoTag: '@axo_clearing_kes' } });
+    if (!clearing) {
+      try {
+        clearing = await prisma.customer.create({
+          data: { axoTag: '@axo_clearing_kes', displayName: 'Axo Clearing (KES)', country: 'XX', currency: 'KES', status: 'active', kycTier: 'verified', wallet: { create: { currency: 'KES' } } },
+        });
+      } catch (e) {
+        if ((e as { code?: string }).code !== 'P2002') throw e;
+        clearing = await prisma.customer.findUniqueOrThrow({ where: { axoTag: '@axo_clearing_kes' } });
+      }
+    }
     ids.clearingId = clearing.id;
   });
 
@@ -95,10 +103,11 @@ d('Wallet API — send to @tag and receive QR', () => {
   });
 
   it('can never send into the internal clearing wallet — over HTTP or through the service', async () => {
-    const before = await wallet(ids.clearingId);
     expect((await send({ toTag: '@axo_clearing_kes', amountMinor: '100', pin: PIN }, `s7-${run}`)).statusCode).toBe(404);
     await expect(sendP2P({ senderId: ids.a, recipientId: ids.clearingId, amountMinor: 100n, currency: 'KES' })).rejects.toThrow();
-    expect(await wallet(ids.clearingId)).toBe(before);
+    // The clearing wallet's own balance moves with every other test's payments
+    // (they run in parallel), so check what matters: nothing went from A to it.
+    expect(await prisma.p2PTransfer.count({ where: { senderId: ids.a, recipientId: ids.clearingId } })).toBe(0);
     expect(await wallet(ids.a)).toBe(9_500n);
   });
 
