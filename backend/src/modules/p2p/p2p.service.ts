@@ -3,6 +3,7 @@ import { prisma, inTransaction } from '../../db/client.js';
 import { postLedger } from '../ledger/ledger.service.js';
 import { quoteTransfer, checkTransfer, transferLegs } from './p2p.lib.js';
 import { screenMovement, openCase } from '../risk/risk.service.js';
+import { enqueueMerchantEvent } from '../notify/outbox.service.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -168,102 +169,151 @@ export async function sendP2P(params: {
 }
 
 /**
- * A customer pays a BUSINESS (merchant) over WhatsApp — the core Axo Business
- * case. One logical payment, posted on both ledgers in the same serializable
- * transaction:
+ * A customer pays a BUSINESS (merchant) — the core Axo Business case. One logical
+ * payment, posted on both ledgers in the same serializable transaction:
  *  - CUSTOMER ledger: debit the customer wallet, credit the clearing wallet.
  *  - MERCHANT ledger: credit the merchant's axo_balance, debit its clearing.
  * The two clearing legs (customer-side credit, merchant-side debit) are the
- * bridge; a business therefore gets paid straight into its Axo balance, with no
- * telco till in the middle, and the payment appears in merchant statements.
+ * bridge; the merchant Transaction records the customer transfer's id
+ * (transferId) so either half can always find the other.
+ *
+ * Axo's own ledger is the rail here, so the posting IS the authoritative
+ * confirmation: nothing is "pending a provider". The merchant's payment.succeeded
+ * event is queued in the same transaction (transactional outbox).
  * Idempotent on idempotencyKey.
  */
-export async function payMerchant(params: {
+export async function payMerchant(params: PayMerchantParams) {
+  return inTransaction((tx) => payMerchantTx(tx, params));
+}
+
+export interface PayMerchantParams {
   customerId: string;
   merchantId: string;
   amountMinor: bigint;
   currency: string;
   note?: string;
   idempotencyKey?: string;
-}) {
-  return inTransaction(async (tx) => {
-    if (params.idempotencyKey) {
-      const existing = await tx.p2PTransfer.findUnique({ where: { idempotencyKey: params.idempotencyKey } });
-      if (existing) return existing;
+  // included in the merchant's payment.succeeded event when the payment settles
+  // a payment request
+  paymentRequest?: { id: string; ref: string; saleRef: string | null };
+}
+
+/** payMerchant inside a caller's transaction, so a caller can settle a payment
+ *  request and post the payment atomically. */
+export async function payMerchantTx(tx: PrismaClient, params: PayMerchantParams) {
+  if (params.idempotencyKey) {
+    const existing = await tx.p2PTransfer.findUnique({ where: { idempotencyKey: params.idempotencyKey } });
+    if (existing) {
+      // A replay answers in the SAME shape as the original call.
+      const mtxn = await tx.transaction.findUnique({ where: { transferId: existing.id } });
+      return { transfer: existing, merchantTransactionId: (mtxn?.id ?? null) as string | null, replayed: true as const };
     }
+  }
 
-    const customer = await tx.customer.findUniqueOrThrow({ where: { id: params.customerId }, include: { wallet: true } });
-    if (!customer.wallet) throw new Error('wallet_missing');
-    const merchant = await tx.merchant.findUniqueOrThrow({ where: { id: params.merchantId } });
-    const merchantBalance = await tx.account.findFirstOrThrow({
-      where: { merchantId: merchant.id, type: 'axo_balance', currency: params.currency },
-    });
-    const merchantClearing = await tx.account.findFirstOrThrow({
-      where: { merchantId: merchant.id, type: 'clearing', currency: params.currency },
-    });
-
-    const quote = quoteTransfer(params.amountMinor);
-    const spendable = customer.wallet.balanceMinor - customer.wallet.reservedMinor;
-    const spent = await spentToday(tx, customer.id);
-    const check = checkTransfer({
-      senderStatus: customer.status,
-      recipientStatus: merchant.accountStatus === 'active' ? 'active' : 'review',
-      senderId: customer.id,
-      recipientId: 'merchant:' + merchant.id,
-      currency: params.currency,
-      senderCurrency: customer.wallet.currency,
-      recipientCurrency: params.currency,
-      spendableMinor: spendable,
-      spentTodayMinor: spent,
-      tier: customer.kycTier as 'basic' | 'verified',
-      quote,
-    });
-    if (!check.ok) throw new Error(check.reason);
-
-    // Business-side transaction (shows in merchant statements, reports, recon).
-    const mtxn = await tx.transaction.create({
-      data: {
-        merchantId: merchant.id,
-        type: 'payment_in',
-        status: 'confirmed',
-        amountMinor: quote.amountMinor,
-        currency: params.currency,
-        provider: 'axo',
-        customerRef: customer.axoTag,
-        confirmedAt: new Date(),
-      },
-    });
-    await postLedger(
-      mtxn.id,
-      [
-        { accountId: merchantBalance.id, direction: 'credit', amountMinor: quote.amountMinor, currency: params.currency },
-        { accountId: merchantClearing.id, direction: 'debit', amountMinor: quote.amountMinor, currency: params.currency },
-      ],
-      tx,
-    );
-
-    // Customer-side transfer + two-sided customer ledger posting (wallet → clearing).
-    const clearing = await clearingWallet(tx, params.currency);
-    const transfer = await tx.p2PTransfer.create({
-      data: {
-        senderId: customer.id,
-        recipientId: clearing.customerId,
-        amountMinor: quote.amountMinor,
-        feeMinor: 0n,
-        currency: params.currency,
-        status: 'pending',
-        note: `pay ${merchant.tradingName}${params.note ? ' · ' + params.note : ''}`,
-        idempotencyKey: params.idempotencyKey,
-      },
-    });
-    await postCustomerLedger(tx, transfer.id, [
-      { accountId: customer.wallet.id, direction: 'debit', amountMinor: quote.amountMinor, currency: params.currency },
-      { accountId: clearing.id, direction: 'credit', amountMinor: quote.amountMinor, currency: params.currency },
-    ]);
-
-    const done = await tx.p2PTransfer.update({ where: { id: transfer.id }, data: { status: 'completed', completedAt: new Date() } });
-    return { transfer: done, merchantTransactionId: mtxn.id };
+  const customer = await tx.customer.findUniqueOrThrow({ where: { id: params.customerId }, include: { wallet: true } });
+  if (!customer.wallet) throw new Error('wallet_missing');
+  const merchant = await tx.merchant.findUniqueOrThrow({ where: { id: params.merchantId } });
+  const merchantBalance = await tx.account.findFirst({
+    where: { merchantId: merchant.id, type: 'axo_balance', currency: params.currency },
   });
+  const merchantClearing = await tx.account.findFirst({
+    where: { merchantId: merchant.id, type: 'clearing', currency: params.currency },
+  });
+  if (!merchantBalance || !merchantClearing) throw new Error('business does not accept ' + params.currency);
+
+  const quote = quoteTransfer(params.amountMinor);
+  const spendable = customer.wallet.balanceMinor - customer.wallet.reservedMinor;
+  const spent = await spentToday(tx, customer.id);
+  const check = checkTransfer({
+    senderStatus: customer.status,
+    recipientStatus: merchant.accountStatus === 'active' ? 'active' : 'review',
+    senderId: customer.id,
+    recipientId: 'merchant:' + merchant.id,
+    currency: params.currency,
+    senderCurrency: customer.wallet.currency,
+    recipientCurrency: params.currency,
+    spendableMinor: spendable,
+    spentTodayMinor: spent,
+    tier: customer.kycTier as 'basic' | 'verified',
+    quote,
+  });
+  if (!check.ok) throw new Error(check.reason);
+
+  // Same risk screen as a person-to-person send — paying a business is still
+  // money leaving a customer's wallet.
+  const risk = await screenMovement({
+    senderCustomerId: customer.id,
+    recipientTag: merchant.axoId,
+    amountMinor: quote.amountMinor,
+    currency: params.currency,
+    tier: customer.kycTier as 'basic' | 'verified',
+    client: tx,
+  });
+  if (risk.decision === 'block') {
+    await openCase({ kind: 'transaction_blocked', subjectType: 'customer', subjectId: customer.id, outcome: risk, reason: 'merchant payment blocked by risk engine' });
+    throw new Error('blocked by risk controls: ' + risk.signals.map((s) => s.code).join(', '));
+  }
+
+  // Customer-side transfer + two-sided customer ledger posting (wallet → clearing).
+  const clearing = await clearingWallet(tx, params.currency);
+  const transfer = await tx.p2PTransfer.create({
+    data: {
+      senderId: customer.id,
+      recipientId: clearing.customerId,
+      amountMinor: quote.amountMinor,
+      feeMinor: 0n,
+      currency: params.currency,
+      status: 'pending',
+      note: `pay ${merchant.tradingName}${params.note ? ' · ' + params.note : ''}`,
+      idempotencyKey: params.idempotencyKey,
+    },
+  });
+  await postCustomerLedger(tx, transfer.id, [
+    { accountId: customer.wallet.id, direction: 'debit', amountMinor: quote.amountMinor, currency: params.currency },
+    { accountId: clearing.id, direction: 'credit', amountMinor: quote.amountMinor, currency: params.currency },
+  ]);
+
+  // Business-side transaction (shows in merchant statements, reports, recon).
+  const mtxn = await tx.transaction.create({
+    data: {
+      merchantId: merchant.id,
+      type: 'payment_in',
+      status: 'confirmed',
+      amountMinor: quote.amountMinor,
+      currency: params.currency,
+      provider: 'axo',
+      providerRef: transfer.id,
+      transferId: transfer.id,
+      customerRef: customer.axoTag,
+      confirmedAt: new Date(),
+    },
+  });
+  await postLedger(
+    mtxn.id,
+    [
+      { accountId: merchantBalance.id, direction: 'credit', amountMinor: quote.amountMinor, currency: params.currency },
+      { accountId: merchantClearing.id, direction: 'debit', amountMinor: quote.amountMinor, currency: params.currency },
+    ],
+    tx,
+  );
+
+  const done = await tx.p2PTransfer.update({ where: { id: transfer.id }, data: { status: 'completed', completedAt: new Date() } });
+  if (risk.decision === 'review') {
+    await openCase({ kind: 'transaction_review', subjectType: 'transfer', subjectId: done.id, outcome: risk, reason: 'merchant payment flagged for review' });
+  }
+
+  await enqueueMerchantEvent(tx, merchant.id, 'payment.succeeded', {
+    transactionId: mtxn.id,
+    transferId: done.id,
+    amountMinor: quote.amountMinor,
+    currency: params.currency,
+    customer: { axoTag: customer.axoTag, displayName: customer.displayName },
+    note: params.note ?? null,
+    paymentRequest: params.paymentRequest ?? null,
+    confirmedAt: mtxn.confirmedAt,
+  });
+
+  return { transfer: done, merchantTransactionId: mtxn.id as string | null, replayed: false as const };
 }
 
 /**
@@ -349,7 +399,7 @@ export async function businessPayCustomer(params: {
 
     // Merchant side: debit balance, credit clearing.
     const mtxn = await tx.transaction.create({
-      data: { merchantId: merchant.id, type: 'payout', status: 'confirmed', amountMinor: params.amountMinor, currency: params.currency, provider: 'axo', customerRef: customer.axoTag, confirmedAt: new Date() },
+      data: { merchantId: merchant.id, type: params.kind === 'refund' ? 'refund' : 'payout', status: 'confirmed', amountMinor: params.amountMinor, currency: params.currency, provider: 'axo', customerRef: customer.axoTag, confirmedAt: new Date() },
     });
     await postLedger(mtxn.id, [
       { accountId: merchantBalance.id, direction: 'debit', amountMinor: params.amountMinor, currency: params.currency },

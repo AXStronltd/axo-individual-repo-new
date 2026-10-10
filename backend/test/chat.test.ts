@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { amountToMinor, formatAmount, currencyDecimals, coachUnknown } from '../src/modules/whatsapp/chat.lib.js';
+import { amountToMinor, formatAmount, currencyDecimals, coachUnknown, countryCurrencyFor } from '../src/modules/whatsapp/chat.lib.js';
+import { formatMiniStatement } from '../src/modules/p2p/statement.lib.js';
 
 describe('per-user currency amount parsing', () => {
   it('KES is zero-decimal', () => {
@@ -46,5 +47,26 @@ describe('coachUnknown — friendlier fallback', () => {
   it('returns null for greetings (menu handles those) and true gibberish', () => {
     expect(coachUnknown('hello')).toBeNull();
     expect(coachUnknown('asdfghjkl')).toBeNull();
+  });
+});
+
+describe('currency decision: KES whole shillings, Somalia USD in cents', () => {
+  it('a Somali number gets a USD wallet; East African numbers get their own zero-decimal currency', () => {
+    expect(countryCurrencyFor('252612345678')).toEqual({ country: 'SO', currency: 'USD' });
+    expect(countryCurrencyFor('254712345678')).toEqual({ country: 'KE', currency: 'KES' });
+    expect(countryCurrencyFor('255712345678')).toEqual({ country: 'TZ', currency: 'TZS' });
+    expect(countryCurrencyFor('256712345678')).toEqual({ country: 'UG', currency: 'UGX' });
+  });
+  it('KES amounts never have cents; USD amounts always do', () => {
+    expect(amountToMinor('12.50', 'KES')).toBeNull(); // refused, never silently rounded to 12
+    expect(amountToMinor('12.00', 'KES')).toBe(12n);
+    expect(amountToMinor('5.555', 'USD')).toBeNull();
+    expect(formatAmount(1250n, 'KES')).toBe('KES 1,250');
+    expect(amountToMinor('12.50', 'USD')).toBe(1250n);
+    expect(formatAmount(1250n, 'USD')).toBe('USD 12.50');
+  });
+  it('the mini-statement shows USD with cents (regression: it printed USD 1250)', () => {
+    const s = formatMiniStatement([{ direction: 'out', amountMinor: 1250n, status: 'completed' }], 'USD', currencyDecimals('USD'));
+    expect(s).toContain('USD 12.50');
   });
 });

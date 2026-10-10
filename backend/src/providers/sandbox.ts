@@ -1,7 +1,7 @@
 import { createHmac } from 'node:crypto';
+import { env } from '../config/env.js';
 import type { ChargeRequest, ChargeResult, PaymentProvider, PayoutRequest, PayoutResult, WebhookVerification } from './types.js';
 
-const SANDBOX_SECRET = 'sandbox-webhook-secret';
 
 /**
  * Deterministic sandbox provider. createCharge returns `accepted` only — it does
@@ -22,7 +22,7 @@ export const sandboxProvider: PaymentProvider = {
 
   parseWebhook(headers: Record<string, string>, rawBody: string): WebhookVerification {
     const sig = headers['x-sandbox-signature'] ?? '';
-    const expected = createHmac('sha256', SANDBOX_SECRET).update(rawBody).digest('hex');
+    const expected = createHmac('sha256', env.SANDBOX_WEBHOOK_SECRET).update(rawBody).digest('hex');
     const valid = sig.length > 0 && timingSafeEqualHex(sig, expected);
     const body = safeJson(rawBody);
     return {
@@ -37,7 +37,7 @@ export const sandboxProvider: PaymentProvider = {
 /** Helper used by tests/tools to produce a correctly signed sandbox webhook. */
 export function signSandboxWebhook(body: object): { rawBody: string; signature: string } {
   const rawBody = JSON.stringify(body);
-  const signature = createHmac('sha256', SANDBOX_SECRET).update(rawBody).digest('hex');
+  const signature = createHmac('sha256', env.SANDBOX_WEBHOOK_SECRET).update(rawBody).digest('hex');
   return { rawBody, signature };
 }
 

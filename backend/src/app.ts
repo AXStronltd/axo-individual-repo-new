@@ -17,6 +17,10 @@ import { collectRoutes } from './modules/collect/collect.routes.js';
 import { globalRoutes } from './modules/global/global.routes.js';
 import { extrasRoutes } from './modules/p2p/extras.routes.js';
 import { agentRoutes } from './modules/agent/agent.routes.js';
+import { payNumberRoutes } from './modules/merchants/paynumbers.routes.js';
+import { customerRoutes } from './modules/customer/customer.routes.js';
+import { integrationRoutes } from './modules/merchants/integrations.routes.js';
+import { reportRoutes } from './modules/reports/reports.routes.js';
 
 export function buildApp() {
   const app = Fastify({ logger: env.APP_ENV === 'live' });
@@ -57,6 +61,10 @@ export function buildApp() {
   app.register(globalRoutes);
   app.register(extrasRoutes);
   app.register(agentRoutes);
+  app.register(payNumberRoutes);
+  app.register(customerRoutes);
+  app.register(integrationRoutes);
+  app.register(reportRoutes);
 
   return app;
 }

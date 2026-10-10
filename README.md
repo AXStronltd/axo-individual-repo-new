@@ -34,12 +34,12 @@ npm install
 npm run prisma:migrate
 npm run seed                # demo wallets: @amina (funded), @juma; agent AMRAN
 npm run dev                 # http://localhost:4000/health
-npm test                    # 155 tests
+npm test                    # 216 tests (DB e2e tests skip without Postgres)
 ```
 
 ## Status
 
-Built and covered by automated tests (155 passing). It has **not** yet run against a real database or a live payment rail, and moving customer money is regulated. Going live needs the rails, a security audit, and licensing (or a licensed partner). See `backend/README.md`.
+216 automated tests pass. 42 of them run over HTTP against a real Postgres: paying a business with a PIN, exactly-once settlement, refunds, and the security fixes in **[SECURITY.md](SECURITY.md)**. Money units: KES in whole shillings; Somalia in USD cents. Nothing has run against live money, and the pages in `frontend/` are demo data that don't call the API yet. Going live needs funding rails, a security audit, and licensing (or a licensed partner). See `backend/README.md` and `docs/POS-API.md`.
 
 ---
 

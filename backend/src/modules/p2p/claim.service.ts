@@ -169,10 +169,13 @@ export async function repointClaimsToNewNumber(params: { oldWaId: string; newWaI
  * or by the expiry sweep. Releases the reservation (no balance ever moved for an
  * unclaimed transfer, so there is nothing to reverse, only to un-reserve).
  */
-export async function refundClaimable(params: { code: string; by?: 'sender' | 'expiry' }) {
+export async function refundClaimable(params: { code: string; by?: 'sender' | 'expiry'; senderId?: string }) {
   return inTransaction(async (tx) => {
     const ct = await tx.claimableTransfer.findUnique({ where: { code: params.code } });
     if (!ct) return { ok: false, reason: 'unknown_code' };
+    // A sender recall must come from the person who sent it. Claim codes are
+    // short, so without this anyone could recall someone else's money by guessing.
+    if (params.by === 'sender' && params.senderId !== ct.senderId) return { ok: false, reason: 'unknown_code' };
     if (ct.status !== 'unclaimed') return { ok: false, reason: 'not_unclaimed' };
     const sender = await tx.customer.findUniqueOrThrow({ where: { id: ct.senderId }, include: { wallet: true } });
     await tx.customerAccount.update({ where: { id: sender.wallet!.id }, data: { reservedMinor: { decrement: ct.amountMinor } } });
