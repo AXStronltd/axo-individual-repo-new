@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#0b141a">
+<title>Axo — Money is a conversation</title>
+<style>
+  :root{
+    --wa-bg:#0b141a;
+    --wa-header:#1f2c34;
+    --wa-in:#1f2c34;       /* incoming bubble (Axo) */
+    --wa-out:#005c4b;      /* outgoing bubble (user) */
+    --wa-panel:#111b21;
+    --wa-field:#2a3942;
+    --axo:#25b573;         /* Axo green */
+    --axo-deep:#0e8a52;
+    --txt:#e9edef;
+    --txt-dim:#8696a0;
+    --txt-mint:#8fd6b4;
+    --line:rgba(255,255,255,.06);
+    --danger:#f0796b;
+    --pending:#e8b84b;
+    --font:'Segoe UI',system-ui,-apple-system,Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%}
+  body{
+    font-family:var(--font);
+    background:#000;
+    color:var(--txt);
+    display:flex;align-items:center;justify-content:center;
+    min-height:100dvh;
+    padding:0;
+  }
+
+  /* ---------- phone frame ---------- */
+  .phone{
+    width:100%;max-width:420px;height:100dvh;max-height:900px;
+    background:var(--wa-bg);
+    display:flex;flex-direction:column;position:relative;overflow:hidden;
+  }
+  @media(min-width:440px){
+    .phone{border-radius:28px;box-shadow:0 24px 80px rgba(0,0,0,.6);border:1px solid #1a1a1a}
+  }
+
+  /* chat wallpaper */
+  .chat{
+    flex:1;overflow-y:auto;overflow-x:hidden;
+    padding:12px 10px 6px;
+    background-color:var(--wa-bg);
+    background-image:
+      radial-gradient(rgba(37,181,115,.05) 1px, transparent 1px);
+    background-size:22px 22px;
+    scroll-behavior:smooth;
+  }
+  .chat::-webkit-scrollbar{width:0}
+
+  /* ---------- header ---------- */
+  .hdr{
+    background:var(--wa-header);
+    padding:10px 12px;display:flex;align-items:center;gap:10px;
+    border-bottom:1px solid var(--line);z-index:5;
+  }
+  .hdr .back{color:var(--txt-dim);font-size:20px;width:22px}
+  .hdr .ava{
+    width:38px;height:38px;border-radius:50%;
+    background:linear-gradient(135deg,var(--axo),var(--axo-deep));
+    display:grid;place-items:center;font-weight:800;color:#fff;font-size:15px;
+    letter-spacing:.5px;position:relative;
+  }
+  .hdr .ava .verok{
+    position:absolute;right:-2px;bottom:-2px;width:14px;height:14px;border-radius:50%;
+    background:#1f9be0;border:2px solid var(--wa-header);display:grid;place-items:center;
+    font-size:7px;color:#fff;
+  }
+  .hdr .who{flex:1;line-height:1.2}
+  .hdr .who b{font-size:15px;font-weight:600}
+  .hdr .who span{font-size:11px;color:var(--txt-dim);display:block}
+  .hdr .ico{color:var(--txt-dim);font-size:17px;width:20px;text-align:center}
+
+  /* ---------- rows & bubbles ---------- */
+  .row{display:flex;margin:3px 0;animation:pop .22s ease}
+  .row.out{justify-content:flex-end}
+  @keyframes pop{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+  .bub{
+    max-width:82%;padding:7px 9px 5px;border-radius:9px;
+    font-size:14.3px;line-height:1.42;position:relative;
+    box-shadow:0 1px 1px rgba(0,0,0,.18);word-wrap:break-word;
+  }
+  .row.in .bub{background:var(--wa-in);border-top-left-radius:2px}
+  .row.out .bub{background:var(--wa-out);border-top-right-radius:2px}
+  .bub .t{font-size:10px;color:var(--txt-dim);float:right;margin:4px 0 -2px 8px}
+  .row.out .bub .t{color:#8fd6b4}
+  .bub b{font-weight:600}
+  .tick{color:#53bdeb;font-size:11px;margin-left:2px}
+
+  .sys{
+    align-self:center;background:#182229;color:var(--txt-dim);
+    font-size:11px;padding:4px 11px;border-radius:8px;margin:8px auto;
+    text-align:center;max-width:80%;
+  }
+
+  /* ---------- interactive quick-reply / action buttons ---------- */
+  .acts{display:flex;flex-direction:column;gap:1px;margin:1px 0 6px;max-width:82%;animation:pop .25s ease}
+  .acts.center{align-self:center;max-width:86%;width:86%}
+  .act{
+    background:var(--wa-in);color:var(--axo);
+    border:none;border-top:1px solid var(--line);
+    padding:11px;font-size:14px;font-weight:600;font-family:var(--font);
+    display:flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;
+    transition:background .12s;
+  }
+  .act:first-child{border-top:none;border-radius:9px 9px 0 0}
+  .act:last-child{border-radius:0 0 9px 9px}
+  .act:only-child{border-radius:9px}
+  .act:active{background:#26343d}
+  .act .g{font-size:15px}
+  .act.dim{color:var(--txt-dim)}
+
+  /* ---------- structured cards inside bubbles ---------- */
+  .card{
+    background:var(--wa-in);border-radius:10px;overflow:hidden;max-width:88%;
+    margin:3px 0 6px;animation:pop .25s ease;border:1px solid var(--line);
+  }
+  .card.wide{width:88%}
+  .card-h{padding:11px 13px;background:linear-gradient(135deg,var(--axo-deep),#0a5c39);font-weight:700;font-size:13px;display:flex;align-items:center;gap:8px}
+  .card-b{padding:6px 13px 12px}
+
+  .bal-row{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line)}
+  .bal-row:last-child{border-bottom:none}
+  .bal-ico{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;font-size:12px;font-weight:800;color:#fff;flex:none}
+  .b-usd{background:#2e7d5b}.b-usdc{background:#2775ca}.b-usdt{background:#26a17b}
+  .bal-name{flex:1;font-size:13px}.bal-name span{display:block;font-size:10.5px;color:var(--txt-dim)}
+  .bal-amt{font-weight:700;font-size:15px;font-variant-numeric:tabular-nums}
+  .bal-total{margin-top:8px;padding-top:9px;border-top:1px dashed var(--line);display:flex;justify-content:space-between;align-items:baseline}
+  .bal-total b{font-size:19px}.bal-total small{color:var(--txt-dim);font-size:11px}
+
+  .recpt{font-size:13px}
+  .recpt .rr{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--line)}
+  .recpt .rr:last-child{border-bottom:none}
+  .recpt .rr span:first-child{color:var(--txt-dim)}
+  .recpt .rr span:last-child{font-weight:600;text-align:right}
+  .recpt .big{font-size:17px}
+  .stamp{display:inline-flex;align-items:center;gap:6px;margin-top:9px;color:var(--axo);font-weight:700;font-size:13px}
+
+  .contact-pick{display:flex;align-items:center;gap:11px;padding:9px 3px;border-bottom:1px solid var(--line);cursor:pointer;transition:background .12s;border-radius:6px}
+  .contact-pick:active{background:#26343d}
+  .contact-pick:last-child{border-bottom:none}
+  .cp-ava{width:36px;height:36px;border-radius:50%;display:grid;place-items:center;font-weight:700;color:#fff;font-size:14px;flex:none}
+  .cp-name{flex:1;font-size:14px}.cp-name span{display:block;font-size:11px;color:var(--txt-dim)}
+  .cp-arrow{color:var(--txt-dim)}
+
+  .chip{display:inline-flex;align-items:center;gap:7px;background:var(--wa-field);border-radius:20px;padding:6px 12px;font-size:13px;margin:2px}
+
+  /* ---------- typing ---------- */
+  .typing{display:flex;gap:3px;padding:11px 12px}
+  .typing i{width:7px;height:7px;border-radius:50%;background:var(--txt-dim);animation:blink 1.2s infinite}
+  .typing i:nth-child(2){animation-delay:.2s}.typing i:nth-child(3){animation-delay:.4s}
+  @keyframes blink{0%,60%,100%{opacity:.3}30%{opacity:1}}
+
+  /* ---------- input bar ---------- */
+  .bar{
+    background:var(--wa-panel);padding:7px 9px;display:flex;align-items:flex-end;gap:7px;
+    border-top:1px solid var(--line);
+  }
+  .bar .field{
+    flex:1;background:var(--wa-field);border-radius:22px;display:flex;align-items:center;
+    padding:9px 14px;gap:9px;min-height:44px;
+  }
+  .bar .field input{
+    flex:1;background:none;border:none;outline:none;color:var(--txt);font-size:14.5px;font-family:var(--font);
+  }
+  .bar .field input::placeholder{color:var(--txt-dim)}
+  .bar .field .emo{color:var(--txt-dim);font-size:19px}
+  .bar .send{
+    width:44px;height:44px;border-radius:50%;flex:none;border:none;cursor:pointer;
+    background:var(--axo);color:#fff;font-size:19px;display:grid;place-items:center;
+    transition:transform .1s;
+  }
+  .bar .send:active{transform:scale(.9)}
+
+  /* ---------- amount pad overlay (in-sheet) ---------- */
+  .amtwrap{background:var(--wa-in);border-radius:10px;padding:12px;max-width:88%;width:88%;margin:3px 0 6px;border:1px solid var(--line);animation:pop .25s ease}
+  .amt-lbl{font-size:11px;color:var(--txt-dim);margin-bottom:4px}
+  .amt-disp{font-size:30px;font-weight:800;text-align:center;padding:6px 0;font-variant-numeric:tabular-nums;letter-spacing:.5px}
+  .amt-disp small{font-size:14px;color:var(--txt-dim);font-weight:600}
+  .asset-tabs{display:flex;gap:6px;margin:8px 0}
+  .asset-tab{flex:1;text-align:center;padding:8px;border-radius:8px;background:var(--wa-field);font-size:12px;font-weight:700;cursor:pointer;color:var(--txt-dim);border:1px solid transparent;transition:.12s}
+  .asset-tab.on{background:rgba(37,181,115,.15);color:var(--axo);border-color:var(--axo)}
+  .keys{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:8px}
+  .key{background:var(--wa-field);border:none;color:var(--txt);font-size:19px;font-weight:600;padding:13px 0;border-radius:9px;cursor:pointer;font-family:var(--font);transition:background .1s}
+  .key:active{background:#37474f}
+  .amt-go{width:100%;margin-top:9px;background:var(--axo);color:#fff;border:none;padding:13px;border-radius:9px;font-size:15px;font-weight:700;cursor:pointer;font-family:var(--font)}
+  .amt-go:disabled{background:#2a3942;color:var(--txt-dim)}
+  .amt-err{color:var(--danger);font-size:11.5px;text-align:center;margin-top:6px;min-height:14px}
+
+  /* progress dots */
+  .kyc-steps{display:flex;gap:6px;margin-top:8px}
+  .kyc-dot{flex:1;height:4px;border-radius:2px;background:var(--wa-field)}
+  .kyc-dot.done{background:var(--axo)}
+
+  /* restart */
+  .restart{position:absolute;top:9px;right:52px;background:rgba(0,0,0,.25);border:1px solid var(--line);color:var(--txt-dim);font-size:10.5px;padding:4px 9px;border-radius:20px;cursor:pointer;z-index:9;font-family:var(--font)}
+
+  a{color:var(--axo)}
+</style>
+</head>
+<body>
+<div class="phone">
+  <div class="hdr">
+    <div class="back">‹</div>
+    <div class="ava">ax<div class="verok">✓</div></div>
+    <div class="who">
+      <b>Axo</b>
+      <span id="presence">online</span>
+    </div>
+    <div class="ico">📞</div>
+    <div class="ico">⋮</div>
+  </div>
+  <button class="restart" onclick="boot()">↻ restart</button>
+
+  <div class="chat" id="chat"></div>
+
+  <div class="bar">
+    <div class="field">
+      <span class="emo">☺</span>
+      <input id="txt" placeholder="Message Axo" autocomplete="off">
+      <span class="emo">📎</span>
+      <span class="emo">📷</span>
+    </div>
+    <button class="send" id="sendBtn">➤</button>
+  </div>
+</div>
+
+<script>
+const chat = document.getElementById('chat');
+const txt  = document.getElementById('txt');
+const now  = () => { const d=new Date(); let h=d.getHours(),m=d.getMinutes(); const ap=h>=12?'PM':'AM'; h=h%12||12; return `${h}:${m<10?'0':''}${m} ${ap}`; };
+const scroll = () => chat.scrollTop = chat.scrollHeight;
+const wait = ms => new Promise(r=>setTimeout(r,ms));
+
+/* ---------- state ---------- */
+let S = {};
+function reset(){
+  S = {
+    name:null, verified:false,
+    bal:{USD:0, USDC:0, USDT:0},
+    step:'boot',
+    draft:{}, // for send flow
+  };
+  chat.innerHTML='';
+}
+
+/* ---------- render helpers ---------- */
+function inBub(html, t=true){
+  const r=document.createElement('div'); r.className='row in';
+  r.innerHTML=`<div class="bub">${html}${t?`<span class="t">${now()}</span>`:''}</div>`;
+  chat.appendChild(r); scroll(); return r;
+}
+function outBub(html){
+  const r=document.createElement('div'); r.className='row out';
+  r.innerHTML=`<div class="bub">${html}<span class="t">${now()} <span class="tick">✓✓</span></span></div>`;
+  chat.appendChild(r); scroll(); return r;
+}
+function sys(t){
+  const d=document.createElement('div'); d.className='sys'; d.textContent=t;
+  chat.appendChild(d); scroll();
+}
+function raw(node){ chat.appendChild(node); scroll(); return node; }
+
+async function typing(ms=900){
+  document.getElementById('presence').textContent='typing…';
+  const r=document.createElement('div'); r.className='row in';
+  r.innerHTML=`<div class="bub" style="padding:0"><div class="typing"><i></i><i></i><i></i></div></div>`;
+  chat.appendChild(r); scroll();
+  await wait(ms);
+  r.remove();
+  document.getElementById('presence').textContent='online';
+}
+
+/* buttons block */
+function actions(list, {center=false}={}){
+  const w=document.createElement('div');
+  w.className='acts'+(center?' center':'');
+  list.forEach(a=>{
+    const b=document.createElement('button');
+    b.className='act'+(a.dim?' dim':'');
+    b.innerHTML=`${a.g?`<span class="g">${a.g}</span>`:''}${a.label}`;
+    b.onclick=()=>{ w.remove(); a.fn(); };
+    w.appendChild(b);
+  });
+  return raw(w);
+}
+
+/* clear any leftover interactive widgets (so old buttons can't be re-clicked) */
+function clearWidgets(){
+  chat.querySelectorAll('.acts,.amtwrap,.card .contact-pick').forEach(e=>{
+    // leave finished cards, remove only live pickers handled inline
+  });
+}
+
+/* ---------- BOOT / ONBOARDING ---------- */
+async function boot(){
+  reset();
+  sys('Today');
+  sys('🔒 Messages are end-to-end encrypted.');
+  await wait(400);
+  await typing(700);
+  inBub(`Welcome to <b>Axo</b> 👋<br>Money is a conversation.<br><br>Send, receive, pay and save in USD, USDC and USDT — right here in WhatsApp. No app. No SIM. No EVC.`);
+  await wait(500);
+  await typing(600);
+  inBub(`Let's set up your account. It takes about 2 minutes.`);
+  actions([
+    {g:'🚀',label:'Create my Axo account', fn:askName},
+    {g:'❓',label:'What is Axo?', dim:true, fn:whatIs},
+  ]);
+  S.step='onboard';
+}
+
+async function whatIs(){
+  outBub('What is Axo?');
+  await typing(700);
+  inBub(`Axo is a digital-dollar wallet built for Somalia. You hold real <b>USD</b> and stablecoins (<b>USDC / USDT</b>), send them to anyone, pay shops, and cash out at nearby agents — all inside WhatsApp.`);
+  actions([{g:'🚀',label:'Create my Axo account', fn:askName}]);
+}
+
+async function askName(){
+  outBub('Create my Axo account');
+  await typing(600);
+  inBub(`Great. What's your full name, as it appears on your ID?`);
+  S.step='name';
+  txt.focus();
+}
+
+/* KYC */
+async function startKyc(){
+  await typing(700);
+  const c=document.createElement('div'); c.className='card wide';
+  c.innerHTML=`
+    <div class="card-h">🪪 Verify your identity (KYC)</div>
+    <div class="card-b">
+      <div style="font-size:13px;color:var(--txt-dim);margin-bottom:6px">Somali law requires us to verify you before you can hold or move money. Your data is encrypted.</div>
+      <div class="kyc-steps"><div class="kyc-dot" id="k1"></div><div class="kyc-dot" id="k2"></div><div class="kyc-dot" id="k3"></div></div>
+    </div>`;
+  raw(c);
+  actions([{g:'📷',label:'Scan my ID document', fn:kycId}],{center:true});
+  S.step='kyc';
+}
+async function kycId(){
+  outBub('📷 Scanning ID…');
+  document.getElementById('k1').classList.add('done');
+  await typing(1100);
+  inBub(`ID received ✓ Now take a quick selfie so we know it's you.`);
+  actions([{g:'🤳',label:'Take selfie', fn:kycSelfie}],{center:true});
+}
+async function kycSelfie(){
+  outBub('🤳 Selfie captured…');
+  document.getElementById('k2').classList.add('done');
+  await typing(1300);
+  document.getElementById('k3').classList.add('done');
+  inBub(`✅ <b>You're verified, ${S.name.split(' ')[0]}!</b><br>Your Axo account is now active.`);
+  S.verified=true;
+  await wait(400);
+  await typing(700);
+  // hand over a starter balance (simulated deposit) so the demo has funds
+  S.bal.USD=1250; S.bal.USDC=350; S.bal.USDT=100;
+  inBub(`We've credited your opening balance from your recent cash deposit at <b>Axo Shop – Hodan</b>.`);
+  await wait(300);
+  await showBalance();
+  await wait(400);
+  await mainMenu(true);
+}
+
+/* ---------- CUSTOMER ID + BALANCE ---------- */
+function fmt(n){ return n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function total(){ return S.bal.USD + S.bal.USDC + S.bal.USDT; } // 1:1 demo peg
+
+async function showBalance(){
+  await typing(600);
+  const c=document.createElement('div'); c.className='card wide';
+  c.innerHTML=`
+    <div class="card-h">💰 My Balance <span style="margin-left:auto;font-weight:500;font-size:11px;opacity:.85">Axo ID · SO-4471</span></div>
+    <div class="card-b">
+      <div class="bal-row"><div class="bal-ico b-usd">$</div><div class="bal-name">US Dollar<span>USD</span></div><div class="bal-amt">$${fmt(S.bal.USD)}</div></div>
+      <div class="bal-row"><div class="bal-ico b-usdc">C</div><div class="bal-name">USD Coin<span>USDC</span></div><div class="bal-amt">${fmt(S.bal.USDC)}</div></div>
+      <div class="bal-row"><div class="bal-ico b-usdt">T</div><div class="bal-name">Tether<span>USDT</span></div><div class="bal-amt">${fmt(S.bal.USDT)}</div></div>
+      <div class="bal-total"><small>Total value</small><b>$${fmt(total())}</b></div>
+    </div>`;
+  raw(c);
+}
+
+async function mainMenu(first=false){
+  await typing(first?500:300);
+  if(first) inBub(`What would you like to do? You can tap below or just type — like “send 50 to Hassan”.`);
+  actions([
+    {g:'💸',label:'Send Money', fn:sendStart},
+    {g:'📥',label:'Request Money', fn:()=>soon('Request Money')},
+    {g:'🏧',label:'Withdraw Cash', fn:()=>soon('Withdraw Cash')},
+    {g:'💰',label:'My Balance', fn:async()=>{outBub('My Balance');await showBalance();mainMenu();}},
+    {g:'🏪',label:'Pay a Merchant', fn:()=>soon('Pay a Merchant')},
+  ]);
+  S.step='menu';
+}
+async function soon(name){
+  outBub(name);
+  await typing(600);
+  inBub(`🛠️ <b>${name}</b> is next on the build list. This prototype covers onboarding, your balance, and sending money end-to-end.`);
+  mainMenu();
+}
+
+/* ---------- SEND MONEY FLOW ---------- */
+const CONTACTS=[
+  {n:'Hassan Ali', p:'+252 61 123 4567', c:'#7c4dff', on:true},
+  {n:'Amina Yusuf', p:'+252 61 987 6543', c:'#e05b4b', on:true},
+  {n:'Mother 💚', p:'+252 61 222 1188', c:'#2e7d5b', on:true},
+  {n:'Omar (Nairobi)', p:'+254 712 445 900', c:'#2775ca', on:false},
+];
+async function sendStart(){
+  outBub('💸 Send Money');
+  if(!S.verified){ // guard — should never hit in this flow, but proves the gate
+    await typing(600);
+    inBub(`You'll need to verify your identity before sending money.`);
+    return startKyc();
+  }
+  S.draft={};
+  await typing(600);
+  inBub(`Who are you sending to?`);
+  const c=document.createElement('div'); c.className='card wide';
+  c.innerHTML=`<div class="card-b" style="padding-top:10px">${
+    CONTACTS.map((k,i)=>`
+      <div class="contact-pick" data-i="${i}">
+        <div class="cp-ava" style="background:${k.c}">${k.n[0]}</div>
+        <div class="cp-name">${k.n}<span>${k.p}${k.on?' · on Axo':' · invite'}</span></div>
+        <div class="cp-arrow">›</div>
+      </div>`).join('')
+  }</div>`;
+  const node=raw(c);
+  node.querySelectorAll('.contact-pick').forEach(el=>{
+    el.onclick=()=>{
+      const k=CONTACTS[+el.dataset.i];
+      node.querySelector('.card-b').innerHTML=''; // collapse picker
+      node.remove();
+      pickAmount(k);
+    };
+  });
+  S.step='send-who';
+}
+
+async function pickAmount(k){
+  S.draft.to=k;
+  outBub(`To: <b>${k.n}</b>`);
+  if(!k.on){
+    await typing(600);
+    inBub(`${k.n.split(' ')[0]} isn't on Axo yet. We'll send them a WhatsApp invite with a secure claim link — they receive the money the moment they join.`);
+  }
+  await typing(500);
+  inBub(`How much would you like to send?`);
+
+  const w=document.createElement('div'); w.className='amtwrap';
+  w.innerHTML=`
+    <div class="amt-lbl">Sending to ${k.n}</div>
+    <div class="asset-tabs">
+      <div class="asset-tab on" data-a="USD">USD</div>
+      <div class="asset-tab" data-a="USDC">USDC</div>
+      <div class="asset-tab" data-a="USDT">USDT</div>
+    </div>
+    <div class="amt-disp"><small>$</small><span id="disp">0</span></div>
+    <div class="amt-err" id="aerr"></div>
+    <div class="keys">
+      ${['1','2','3','4','5','6','7','8','9','.','0','⌫'].map(x=>`<button class="key" data-k="${x}">${x}</button>`).join('')}
+    </div>
+    <button class="amt-go" id="ago" disabled>Continue</button>`;
+  const node=raw(w);
+
+  let val='0', asset='USD';
+  const disp=node.querySelector('#disp'), go=node.querySelector('#ago'), err=node.querySelector('#aerr');
+  const sym={USD:'$',USDC:'',USDT:''};
+  function refresh(){
+    disp.textContent = val;
+    node.querySelector('.amt-disp small').textContent = sym[asset]||'';
+    const n=parseFloat(val)||0;
+    const avail=S.bal[asset];
+    if(n>avail){ err.textContent=`Not enough ${asset}. You have ${fmt(avail)}.`; go.disabled=true; }
+    else if(n<=0){ err.textContent=''; go.disabled=true; }
+    else { err.textContent=''; go.disabled=false; }
+  }
+  node.querySelectorAll('.asset-tab').forEach(t=>t.onclick=()=>{
+    node.querySelectorAll('.asset-tab').forEach(x=>x.classList.remove('on'));
+    t.classList.add('on'); asset=t.dataset.a; refresh();
+  });
+  node.querySelectorAll('.key').forEach(b=>b.onclick=()=>{
+    const kx=b.dataset.k;
+    if(kx==='⌫'){ val=val.length>1?val.slice(0,-1):'0'; }
+    else if(kx==='.'){ if(!val.includes('.')) val+='.'; }
+    else { if(val==='0') val=kx; else if(!(val.includes('.')&&val.split('.')[1].length>=2)) val+=kx; }
+    refresh();
+  });
+  go.onclick=()=>{
+    S.draft.amount=parseFloat(val); S.draft.asset=asset;
+    node.remove();
+    confirmSend();
+  };
+  refresh();
+  S.step='send-amt';
+}
+
+async function confirmSend(){
+  const d=S.draft;
+  const fee = +(d.amount*0.005).toFixed(2); // 0.5% demo fee
+  const totalOut = +(d.amount+fee).toFixed(2);
+  d.fee=fee; d.totalOut=totalOut;
+  outBub(`${d.asset==='USD'?'$':''}${fmt(d.amount)} ${d.asset!=='USD'?d.asset:''}`);
+  await typing(700);
+  inBub(`Please confirm this transfer:`);
+  const c=document.createElement('div'); c.className='card wide';
+  c.innerHTML=`
+    <div class="card-h">🔎 Confirm transfer</div>
+    <div class="card-b recpt">
+      <div class="rr"><span>To</span><span>${d.to.n}<br><small style="color:var(--txt-dim);font-weight:400">${d.to.p}</small></span></div>
+      <div class="rr"><span>Amount</span><span class="big">${d.asset==='USD'?'$':''}${fmt(d.amount)} ${d.asset!=='USD'?d.asset:''}</span></div>
+      <div class="rr"><span>Fee (0.5%)</span><span>${d.asset==='USD'?'$':''}${fmt(fee)}</span></div>
+      <div class="rr"><span>Total to pay</span><span class="big">${d.asset==='USD'?'$':''}${fmt(totalOut)} ${d.asset!=='USD'?d.asset:''}</span></div>
+    </div>`;
+  raw(c);
+  actions([
+    {g:'✅',label:`Confirm & send`, fn:doSend},
+    {g:'✏️',label:'Change amount', dim:true, fn:()=>pickAmount(d.to)},
+    {g:'✕',label:'Cancel', dim:true, fn:cancelSend},
+  ],{center:true});
+  S.step='send-confirm';
+}
+async function cancelSend(){
+  outBub('Cancel');
+  await typing(400);
+  inBub('No problem — nothing was sent.');
+  mainMenu();
+}
+async function doSend(){
+  const d=S.draft;
+  outBub('✅ Confirm & send');
+  await typing(1100);
+  // ledger write
+  S.bal[d.asset] = +(S.bal[d.asset]-d.totalOut).toFixed(2);
+  const ref = 'AXO'+Math.floor(100000+Math.random()*900000);
+  const c=document.createElement('div'); c.className='card wide';
+  c.innerHTML=`
+    <div class="card-h" style="background:linear-gradient(135deg,#0e8a52,#0a5c39)">🧾 Payment sent</div>
+    <div class="card-b recpt">
+      <div class="stamp">✅ ${d.asset==='USD'?'$':''}${fmt(d.amount)} ${d.asset!=='USD'?d.asset:''} sent to ${d.to.n.split(' ')[0]}</div>
+      <div class="rr" style="margin-top:8px"><span>To</span><span>${d.to.n}</span></div>
+      <div class="rr"><span>Amount</span><span>${d.asset==='USD'?'$':''}${fmt(d.amount)} ${d.asset!=='USD'?d.asset:''}</span></div>
+      <div class="rr"><span>Fee</span><span>${d.asset==='USD'?'$':''}${fmt(d.fee)}</span></div>
+      <div class="rr"><span>New ${d.asset} balance</span><span>${d.asset==='USD'?'$':''}${fmt(S.bal[d.asset])}</span></div>
+      <div class="rr"><span>Reference</span><span style="font-variant-numeric:tabular-nums">${ref}</span></div>
+      <div class="rr"><span>Time</span><span>${now()}</span></div>
+    </div>`;
+  raw(c);
+  await wait(500);
+  if(d.to.on){
+    await typing(600);
+    inBub(`${d.to.n.split(' ')[0]} received your money instantly and has been notified on WhatsApp. 💚`);
+  }else{
+    await typing(600);
+    inBub(`We've sent ${d.to.n.split(' ')[0]} a claim link. You'll get a message when they collect it.`);
+  }
+  await wait(300);
+  await mainMenu();
+}
+
+/* ---------- free-text handling ---------- */
+function handleText(v){
+  const t=v.trim(); if(!t) return;
+  const low=t.toLowerCase();
+
+  if(S.step==='name'){
+    if(t.split(' ').length<2){ outBub(t); inBub2(`Please enter your first and last name.`); return; }
+    S.name=t;
+    outBub(t);
+    afterName();
+    return;
+  }
+  // generic
+  outBub(t);
+  if(S.step==='menu'||S.step==='onboard'){
+    if(/send|money|pay/.test(low) && S.verified){ sendStart(); return; }
+    if(/balance/.test(low) && S.verified){ (async()=>{await showBalance();mainMenu();})(); return; }
+  }
+  fallback();
+}
+async function inBub2(h){ await typing(500); inBub(h); }
+async function afterName(){
+  await typing(700);
+  inBub(`Nice to meet you, <b>${S.name.split(' ')[0]}</b>. 🌟`);
+  await startKyc();
+}
+async function fallback(){
+  await typing(600);
+  if(!S.verified){ inBub(`Let's finish setting up your account first.`); mainMenu&&null; return; }
+  inBub(`I didn't quite catch that. Tap one of the options below.`);
+  mainMenu();
+}
+
+/* input wiring */
+document.getElementById('sendBtn').onclick=fire;
+txt.addEventListener('keydown',e=>{ if(e.key==='Enter') fire(); });
+function fire(){ const v=txt.value; txt.value=''; handleText(v); }
+
+boot();
+</script>
+</body>
+</html>

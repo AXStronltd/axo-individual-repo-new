@@ -1,0 +1,356 @@
+<title>Axo on WhatsApp</title>
+<style>
+  /* Layout: a single phone frame centered on a soft ground; WhatsApp chat inside.
+     Palette keys off WhatsApp's own identity (teal header, green send bubble,
+     chat wallpaper) with an Axo green accent for money confirmations. */
+  :root{
+    --ground:#e9edf0; --phone:#ffffff; --phone-edge:#cfd6db;
+    --wa-header:#008069; --wa-header-fg:#ffffff;
+    --chat-bg:#efe7dd; --chat-pattern:#e6dccf;
+    --bubble-in:#ffffff; --bubble-out:#d9fdd3; --bubble-fg:#111b21;
+    --meta:#667781; --tick:#53bdeb;
+    --axo:#1fa463; --axo-deep:#13794a; --axo-glow:rgba(31,164,99,.14);
+    --warn:#b26a00; --danger:#c0392b;
+    --qr-bg:#f0f2f5; --qr-chip:#ffffff; --qr-chip-fg:#008069; --qr-chip-edge:#d7dde0;
+    --input-bg:#ffffff; --panel:#ffffff; --hairline:rgba(0,0,0,.08);
+    --font:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+    --display:'Space Grotesk',var(--font);
+  }
+  @media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+    --ground:#0b141a; --phone:#111b21; --phone-edge:#20303a;
+    --wa-header:#1f2c33; --wa-header-fg:#e9edef;
+    --chat-bg:#0b141a; --chat-pattern:#111b21;
+    --bubble-in:#1f2c33; --bubble-out:#005c4b; --bubble-fg:#e9edef;
+    --meta:#8696a0; --tick:#53bdeb;
+    --axo:#2bd17e; --axo-deep:#1fa463; --axo-glow:rgba(43,209,126,.15);
+    --warn:#e0a24a; --danger:#f0776b;
+    --qr-bg:#1f2c33; --qr-chip:#2a3942; --qr-chip-fg:#2bd17e; --qr-chip-edge:#30414c;
+    --input-bg:#2a3942; --panel:#1f2c33; --hairline:rgba(255,255,255,.1);
+    color-scheme:dark;
+  }}
+  :root[data-theme="dark"]{
+    --ground:#0b141a; --phone:#111b21; --phone-edge:#20303a;
+    --wa-header:#1f2c33; --wa-header-fg:#e9edef;
+    --chat-bg:#0b141a; --chat-pattern:#111b21;
+    --bubble-in:#1f2c33; --bubble-out:#005c4b; --bubble-fg:#e9edef;
+    --meta:#8696a0; --tick:#53bdeb;
+    --axo:#2bd17e; --axo-deep:#1fa463; --axo-glow:rgba(43,209,126,.15);
+    --warn:#e0a24a; --danger:#f0776b;
+    --qr-bg:#1f2c33; --qr-chip:#2a3942; --qr-chip-fg:#2bd17e; --qr-chip-edge:#30414c;
+    --input-bg:#2a3942; --panel:#1f2c33; --hairline:rgba(255,255,255,.1);
+    color-scheme:dark;
+  }
+
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{background:var(--ground);color:var(--bubble-fg);font-family:var(--font);
+    display:flex;flex-direction:column;align-items:center;gap:14px;
+    padding-block:22px;padding-left:16px;padding-right:16px}
+
+  .masthead{width:100%;max-width:430px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .masthead h1{font-family:var(--display);font-size:17px;font-weight:600;margin:0;letter-spacing:-.2px}
+  .masthead .sub{font-size:12px;color:var(--meta);margin:0;flex-basis:100%}
+  .masthead .seg{margin-left:auto;display:flex;gap:4px;background:var(--panel);border:1px solid var(--phone-edge);border-radius:999px;padding:3px}
+  .masthead .seg button{border:none;background:none;font-family:var(--font);font-size:11.5px;font-weight:600;color:var(--meta);padding:5px 10px;border-radius:999px;cursor:pointer;white-space:nowrap}
+  .masthead .seg button[aria-pressed="true"]{background:var(--axo);color:#fff}
+
+  /* phone */
+  .phone{width:100%;max-width:400px;height:min(760px,calc(100vh - 150px));min-height:560px;
+    background:var(--phone);border:1px solid var(--phone-edge);border-radius:30px;
+    box-shadow:0 20px 50px rgba(0,0,0,.18);overflow:hidden;display:flex;flex-direction:column;position:relative}
+
+  .wa-top{background:var(--wa-header);color:var(--wa-header-fg);display:flex;align-items:center;gap:11px;padding:12px 14px;flex:none}
+  .wa-back{font-size:20px;opacity:.9;line-height:1}
+  .wa-av{width:38px;height:38px;border-radius:50%;background:linear-gradient(135deg,var(--axo),var(--axo-deep));display:grid;place-items:center;font-family:var(--display);font-weight:700;font-size:15px;color:#fff;flex:none}
+  .wa-id{min-width:0}
+  .wa-name{font-weight:600;font-size:15px;display:flex;align-items:center;gap:5px}
+  .wa-name .verified{font-size:12px}
+  .wa-stat{font-size:11.5px;opacity:.85;margin-top:1px}
+  .wa-actions{margin-left:auto;display:flex;gap:16px;opacity:.9;font-size:16px}
+
+  .wa-chat{flex:1;overflow-y:auto;background:var(--chat-bg);
+    background-image:radial-gradient(var(--chat-pattern) 1px,transparent 1px);
+    background-size:18px 18px;padding:14px 12px 6px;display:flex;flex-direction:column;gap:7px}
+  .wa-chat::-webkit-scrollbar{width:0}
+
+  .day{align-self:center;background:var(--bubble-in);color:var(--meta);font-size:11px;font-weight:600;
+    padding:4px 11px;border-radius:9px;box-shadow:0 1px 1px rgba(0,0,0,.05);margin:4px 0}
+
+  .row{display:flex;max-width:84%}
+  .row.me{align-self:flex-end;justify-content:flex-end}
+  .row.them{align-self:flex-start}
+  .bub{position:relative;border-radius:10px;padding:7px 10px 18px;font-size:14px;line-height:1.38;
+    box-shadow:0 1px .5px rgba(0,0,0,.08);white-space:pre-wrap;word-break:break-word}
+  .row.them .bub{background:var(--bubble-in);border-top-left-radius:2px}
+  .row.me .bub{background:var(--bubble-out);border-top-right-radius:2px}
+  .bub b{font-weight:700}
+  .bub .time{position:absolute;right:9px;bottom:5px;font-size:10px;color:var(--meta)}
+  .bub .time .dbl{color:var(--tick);margin-left:2px;letter-spacing:-2px}
+
+  /* money confirmation card inside a bubble */
+  .pay-card{border:1px solid var(--axo);background:var(--axo-glow);border-radius:10px;padding:10px 11px;margin:3px 0 2px}
+  .pay-card .pc-h{font-size:10.5px;font-weight:700;letter-spacing:.5px;color:var(--axo-deep);text-transform:uppercase}
+  .pay-card .pc-amt{font-family:var(--display);font-size:22px;font-weight:600;margin:4px 0 1px;font-variant-numeric:tabular-nums}
+  .pay-card .pc-to{font-size:12.5px;color:var(--meta)}
+  .receipt{display:inline-block;margin-top:4px;font-size:11px;font-weight:700;color:var(--axo-deep)}
+
+  /* quick replies */
+  .quick{flex:none;display:flex;gap:7px;overflow-x:auto;padding:9px 12px;background:var(--chat-bg);border-top:1px solid var(--hairline);scrollbar-width:none}
+  .quick::-webkit-scrollbar{display:none}
+  .chip{flex:none;border:1px solid var(--axo);background:var(--phone);color:var(--axo-deep);
+    font-family:var(--font);font-size:12.5px;font-weight:600;padding:7px 13px;border-radius:999px;cursor:pointer;transition:.12s;white-space:nowrap}
+  .chip:hover{background:var(--axo-glow)}
+  .chip:active{transform:scale(.96)}
+  .chip.pin{font-family:var(--display);letter-spacing:1px}
+
+  .wa-input{flex:none;display:flex;align-items:center;gap:8px;padding:9px 12px;background:var(--chat-bg)}
+  .wa-input .field{flex:1;display:flex;align-items:center;background:var(--input-bg);border-radius:22px;padding:9px 14px;min-width:0}
+  .wa-input input{flex:1;border:none;outline:none;background:none;font-family:var(--font);font-size:14px;color:var(--bubble-fg);min-width:0}
+  .wa-input input::placeholder{color:var(--meta)}
+  .wa-send{width:42px;height:42px;border-radius:50%;background:var(--wa-header);color:#fff;border:none;display:grid;place-items:center;font-size:18px;cursor:pointer;flex:none}
+  .wa-send:active{transform:scale(.94)}
+
+  .typing .bub{color:var(--meta);font-style:italic}
+  .caption{width:100%;max-width:430px;font-size:12px;color:var(--meta);text-align:center;line-height:1.5}
+  .caption b{color:var(--bubble-fg)}
+  @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+
+<div class="masthead">
+  <div class="wa-av" style="width:34px;height:34px;font-size:13px">ax</div>
+  <h1>Axo on WhatsApp</h1>
+  <div class="seg" role="group" aria-label="Who you are">
+    <button id="segKE" aria-pressed="true" onclick="setUser('KE')">🇰🇪 Amina · KES</button>
+    <button id="segSO" aria-pressed="false" onclick="setUser('SO')">🇸🇴 Cali · USD</button>
+  </div>
+  <p class="sub">The customer side — what anyone with WhatsApp sees. Tap a suggestion or type a command.</p>
+</div>
+
+<div class="phone">
+  <div class="wa-top">
+    <span class="wa-back">‹</span>
+    <span class="wa-av">ax</span>
+    <div class="wa-id">
+      <div class="wa-name">Axo <span class="verified" title="Business account">✔️</span></div>
+      <div class="wa-stat">business account · online</div>
+    </div>
+    <div class="wa-actions"><span>📞</span><span>⋮</span></div>
+  </div>
+  <div class="wa-chat" id="chat"></div>
+  <div class="quick" id="quick"></div>
+  <form class="wa-input" id="form" autocomplete="off">
+    <div class="field"><input id="msg" placeholder="Message" aria-label="Type a message"></div>
+    <button class="wa-send" id="sendBtn" type="submit" aria-label="Send">➤</button>
+  </form>
+</div>
+
+<p class="caption">This mirrors the real Axo chat logic: <b>every send confirms before money moves</b>, amounts show in your own currency, and vague messages get guided. A demo of the customer experience — not connected to live money.</p>
+
+<script>
+/* ---------- state ---------- */
+const USERS = {
+  KE:{name:'Amina', tag:'@amina', cur:'KES', dec:0, bal:5000, pin:'1234', flag:'🇰🇪'},
+  SO:{name:'Cali',  tag:'@cali',  cur:'USD', dec:2, bal:25000, pin:null, flag:'🇸🇴'}
+};
+let U = 'KE';
+let pending = null;       // staged money action awaiting PIN/YES
+let awaitingPinFor = null;
+const chat = document.getElementById('chat');
+const quickBar = document.getElementById('quick');
+
+function cur(){return USERS[U];}
+function now(){const d=new Date();return d.getHours().toString().padStart(2,'0')+':'+d.getMinutes().toString().padStart(2,'0');}
+
+/* money formatting — matches backend chat.lib (zero-dec KES, 2-dec USD) */
+function fmt(minor){
+  const c=cur(); const dec=c.dec; const neg=minor<0; let abs=Math.abs(minor);
+  let s=abs.toString().padStart(dec+1,'0');
+  let whole=s.slice(0,s.length-dec)||'0';
+  whole=whole.replace(/\B(?=(\d{3})+(?!\d))/g,',');
+  const frac=dec>0?'.'+s.slice(s.length-dec):'';
+  return c.cur+' '+(neg?'-':'')+whole+frac;
+}
+function toMinor(str){
+  const c=cur(); const s=String(str).replace(/,/g,'').trim();
+  if(!/^\d+(\.\d+)?$/.test(s))return null;
+  const [w,f='']=s.split('.');
+  const fp=(f+'0'.repeat(c.dec)).slice(0,c.dec);
+  const m=parseInt((w||'0')+(c.dec>0?fp:''),10);
+  return m>0?m:null;
+}
+
+/* ---------- rendering ---------- */
+function esc(t){return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function bubble(side, html, opts={}){
+  const row=document.createElement('div'); row.className='row '+side;
+  const dbl = side==='me' ? '<span class="dbl">✓✓</span>' : '';
+  row.innerHTML='<div class="bub">'+html+'<span class="time">'+now()+(side==='me'?dbl:'')+'</span></div>';
+  chat.appendChild(row); chat.scrollTop=chat.scrollHeight; return row;
+}
+function botSay(html){ return new Promise(res=>{
+  const t=document.createElement('div'); t.className='row them typing';
+  t.innerHTML='<div class="bub">Axo is typing…</div>'; chat.appendChild(t); chat.scrollTop=chat.scrollHeight;
+  setTimeout(()=>{ t.remove(); bubble('them',html); res(); }, 420);
+});}
+
+function setQuick(items){
+  quickBar.innerHTML='';
+  items.forEach(it=>{
+    const b=document.createElement('button');
+    b.className='chip'+(it.pin?' pin':''); b.textContent=it.label;
+    b.onclick=()=>handle(it.send);
+    quickBar.appendChild(b);
+  });
+}
+
+/* ---------- the conversation brain (mirrors whatsapp router) ---------- */
+function defaultQuick(){
+  const base=[
+    {label:'💰 Balance', send:'balance'},
+    {label:'Send '+cur().cur+' 500 to @juma', send:'send 500 to @juma'},
+    {label:'Pay Till 832909', send:'till 832909 500'},
+    {label:'👛 Receive crypto', send:'crypto'},
+    {label:'🌐 Send globally', send:'global 100 USD to 0xabc123'},
+    {label:'🧾 Mini-statement', send:'mini'},
+    {label:'Help', send:'help'}
+  ];
+  setQuick(base);
+}
+
+async function handle(text){
+  text=text.trim(); if(!text) return;
+  bubble('me', esc(text));
+  document.getElementById('msg').value='';
+
+  // a staged confirmation takes priority
+  if(pending){
+    const low=text.toLowerCase();
+    if(/^(no|cancel)$/.test(low)){ pending=null; await botSay('Cancelled. Nothing was sent.'); defaultQuick(); return; }
+    const needPin = awaitingPinFor!=null;
+    if(needPin && /^\d{4,6}$/.test(text)){
+      if(text===cur().pin){ await settle(); } else { await botSay('Wrong PIN. Try again, or reply <b>NO</b> to cancel.'); setQuick([{label:'•••• PIN',pin:true,send:cur().pin},{label:'Cancel',send:'no'}]); }
+      return;
+    }
+    if(!needPin && /^(yes|y)$/.test(low)){ await settle(); return; }
+    await botSay('You have a payment waiting. Reply with your '+(needPin?'<b>PIN</b>':'<b>YES</b>')+' to confirm, or <b>NO</b> to cancel.');
+    return;
+  }
+
+  const r = parse(text);
+  if(r.kind==='balance'){ await botSay('💰 '+cur().tag+'<br>Balance: <b>'+fmt(cur().bal)+'</b>'); defaultQuick(); return; }
+  if(r.kind==='help'){ await botSay(menu()); defaultQuick(); return; }
+  if(r.kind==='mini'){ await botSay(miniStatement()); defaultQuick(); return; }
+  if(r.kind==='setpin'){ cur().pin=r.pin; await botSay('🔒 Your PIN is set. You’ll be asked for it before sending money.'); defaultQuick(); return; }
+  if(r.kind==='crypto'){ const a='0x'+(cur().tag.length*7103).toString(16)+'…axo'+(2000+cur().tag.length*11); await botSay('👛 Your Axo crypto address (USDC/USDT):<br><b>'+a+'</b><br><br>Anyone, anywhere can send you stablecoin here — it lands in your Axo wallet once confirmed on-chain. No bank, no borders.'); defaultQuick(); return; }
+  if(r.kind==='global'){ const amt=toMinor(r.amount); if(amt===null){await botSay('Enter a valid amount, e.g. GLOBAL 100 USD to 0xabc…'); defaultQuick(); return;}
+    pending={amt,to:r.dest+' ('+r.toCur+')',note:'global to '+r.dest,kind:'global'}; awaitingPinFor=cur().pin?r.dest:null;
+    const card='<div class="pay-card"><div class="pc-h">Confirm global send</div><div class="pc-amt">'+fmt(amt)+'</div><div class="pc-to">→ '+r.toCur+' to '+esc(r.dest)+'</div></div>FX rate &amp; fee are shown at settlement.<br>';
+    if(cur().pin){ await botSay(card+'Reply with your <b>PIN</b> to send, or <b>NO</b> to cancel.'); setQuick([{label:'•••• Enter PIN',pin:true,send:cur().pin},{label:'Cancel',send:'no'}]); }
+    else{ await botSay(card+'Reply <b>YES</b> to send, or <b>NO</b> to cancel.'); setQuick([{label:'✅ YES, send',send:'yes'},{label:'Cancel',send:'no'}]); }
+    return; }
+  if(r.kind==='send'||r.kind==='send_phone'||r.kind==='pay'){ return stage(r); }
+  // fallback coach
+  const coach = coachUnknown(text);
+  await botSay(coach ?? ("I didn’t catch that.<br>"+menu()));
+  defaultQuick();
+}
+
+function parse(t){
+  const l=t.toLowerCase();
+  if(/^(balance|bal|salio|hadhaag)\b/.test(l)) return {kind:'balance'};
+  if(/^(help|menu|msaada|caawin)\b/.test(l)) return {kind:'help'};
+  if(/^(mini|ministatement|history|statement)\b/.test(l)) return {kind:'mini'};
+  if(/^(crypto|receive crypto|usdc|usdt)\b/.test(l)) return {kind:'crypto'};
+  let g=t.match(/^(?:send ?global|global)\s+([\d,.]+)\s+([a-z]{3,4})\s+to\s+(\S+)$/i); if(g) return {kind:'global',amount:g[1],toCur:g[2].toUpperCase(),dest:g[3]};
+  let m=l.match(/^set ?pin\s+(\d{4,6})$/); if(m) return {kind:'setpin',pin:m[1]};
+  m=l.match(/^(?:paybill|lipa)\s+(\d[\d ]{3,})\s+(\S+)\s+([\d,.]+)$/); if(m) return {kind:'pay',ptype:'Paybill',number:m[1].replace(/\s/g,''),account:m[2].toUpperCase(),amount:m[3]};
+  m=l.match(/^(?:pay\s+)?(?:till|buygoods|duka)\s+(\d[\d ]{3,})\s+([\d,.]+)$/); if(m) return {kind:'pay',ptype:'Till',number:m[1].replace(/\s/g,''),amount:m[2]};
+  m=l.match(/^send ?to\s+(\+?\d[\d ]{6,})\s+([\d,.]+)$/); if(m) return {kind:'send_phone',phone:m[1].replace(/\s/g,''),amount:m[2]};
+  m=l.match(/^(?:send|tuma|dir)\s+([\d,.]+)\s+(?:to|kwa|u)\s+(\S+)$/); if(m) return {kind:'send',to:m[2],amount:m[1]};
+  return {kind:'unknown',text:t};
+}
+
+function coachUnknown(t){
+  const l=t.toLowerCase();
+  if(/\b(send|transfer|tuma|kutuma|dir)\b/.test(l)&&!/\b(till|paybill|shop|business)\b/.test(l))
+    return 'To send money, reply:<br>• <b>SEND &lt;amount&gt; to @tag</b> (to an Axo user)<br>• <b>SENDTO &lt;phone&gt; &lt;amount&gt;</b> (to anyone)';
+  if(/\b(pay|buy|shop|duka|business|till|paybill)\b/.test(l))
+    return 'To pay a business, reply:<br>• <b>TILL &lt;number&gt; &lt;amount&gt;</b><br>• <b>PAYBILL &lt;number&gt; &lt;account&gt; &lt;amount&gt;</b>';
+  if(/\b(how much|balance|money|do i have|pesa ngapi|lacag)\b/.test(l)) return 'To see your balance, just reply <b>BALANCE</b>.';
+  if(/\b(history|statement|recent|last)\b/.test(l)) return 'For recent transactions, reply <b>MINI</b>.';
+  return null;
+}
+
+function menu(){
+  return 'Axo menu:<br>• <b>BALANCE</b> · <b>MINI</b><br>• <b>SEND</b> &lt;amount&gt; to @tag<br>• <b>SENDTO</b> &lt;phone&gt; &lt;amount&gt;<br>• <b>TILL</b> / <b>PAYBILL</b> &lt;no&gt; &lt;amount&gt;<br>• <b>SETPIN</b> 1234';
+}
+
+/* history of this session's sends for the mini-statement */
+const ledger=[];
+function miniStatement(){
+  if(!ledger.length) return 'No transactions yet. Try sending something.';
+  const lines=ledger.slice(0,5).map(x=>(x.dir==='out'?'− ':'+ ')+fmt(x.amt)+(x.note?' · '+x.note:'')+' · done');
+  return '🧾 Mini-statement (last '+Math.min(5,ledger.length)+'):<br>'+lines.join('<br>');
+}
+
+/* stage → confirm → settle (the safety step) */
+async function stage(r){
+  const amt=toMinor(r.amount);
+  if(amt===null){ await botSay('Enter a valid amount, e.g. <b>SEND 500 to @juma</b>.'); defaultQuick(); return; }
+  let to, summary, note;
+  if(r.kind==='send'){ to=r.to.startsWith('@')?r.to:'@'+r.to; summary='Send <b>'+fmt(amt)+'</b> to '+to; note='to '+to; }
+  else if(r.kind==='send_phone'){ to=r.phone; summary='Send <b>'+fmt(amt)+'</b> to '+to; note='to '+to; }
+  else { to = r.ptype+' '+r.number+(r.account?' (a/c '+r.account+')':''); summary='Pay <b>'+fmt(amt)+'</b> to '+to; note=r.ptype+' '+r.number; }
+  pending={amt, to, note, kind:r.kind};
+  awaitingPinFor = cur().pin ? to : null;
+
+  const card='<div class="pay-card"><div class="pc-h">Confirm payment</div>'
+    +'<div class="pc-amt">'+fmt(amt)+'</div><div class="pc-to">to '+esc(to)+'</div></div>';
+  if(cur().pin){
+    await botSay(card+'Reply with your <b>PIN</b> to send, or <b>NO</b> to cancel.');
+    setQuick([{label:'•••• Enter PIN', pin:true, send:cur().pin},{label:'Cancel', send:'no'}]);
+  }else{
+    await botSay(card+'Reply <b>YES</b> to send, or <b>NO</b> to cancel.<br><span style="color:var(--warn)">Tip: set a PIN with SETPIN 1234 for extra safety.</span>');
+    setQuick([{label:'✅ YES, send', send:'yes'},{label:'Cancel', send:'no'},{label:'🔒 SETPIN 1234', send:'setpin 1234'}]);
+  }
+}
+async function settle(){
+  const p=pending; pending=null; awaitingPinFor=null;
+  cur().bal -= p.amt;
+  ledger.unshift({dir:'out', amt:p.amt, note:p.note});
+  let msg;
+  if(p.kind==='send_phone'){
+    const code='CLM-'+Math.floor(100000+Math.random()*899999);
+    msg='📤 <b>'+fmt(p.amt)+'</b> reserved for '+esc(p.to)+'. They’ll get a message to claim it (code '+code+').<br><span class="receipt">✓ Sent · reply RECALL '+code+' to cancel</span>';
+  }else if(p.kind==='global'){
+    msg='🌐 Sending <b>'+fmt(p.amt)+'</b> to '+esc(p.to)+'. You’ll get a confirmation when it settles.<br><span class="receipt">✓ Cross-border send started · new balance '+fmt(cur().bal)+'</span>';
+  }else{
+    msg='<div class="pay-card"><div class="pc-h">Payment sent</div><div class="pc-amt">'+fmt(p.amt)+'</div><div class="pc-to">to '+esc(p.to)+'</div></div><span class="receipt">✓ Done · new balance '+fmt(cur().bal)+'</span>';
+  }
+  await botSay(msg);
+  // simulate the recipient receiving it (for an @tag send)
+  if(p.kind==='send'){ setTimeout(()=>{ /* recipient side is on their own phone */ },300); }
+  defaultQuick();
+}
+
+/* ---------- boot ---------- */
+function dayChip(){ const d=document.createElement('div'); d.className='day'; d.textContent='TODAY'; chat.appendChild(d); }
+
+function setUser(which){
+  U=which;
+  document.getElementById('segKE').setAttribute('aria-pressed', which==='KE');
+  document.getElementById('segSO').setAttribute('aria-pressed', which==='SO');
+  pending=null; awaitingPinFor=null; ledger.length=0;
+  chat.innerHTML=''; dayChip();
+  const c=cur();
+  bubble('them','👋 Hi '+c.name+'! Welcome to <b>Axo</b> — money over WhatsApp. No SIM, no app to install.');
+  bubble('them','Your wallet '+c.tag+' is ready with <b>'+fmt(c.bal)+'</b>.'+(c.pin?' Your PIN protects every payment.':' Set a PIN anytime with SETPIN.'));
+  // show an inbound business payment — proves money comes IN as clearly as it goes out
+  setTimeout(()=>{ const inAmt = U==='KE'?1200:1500; c.bal+=inAmt; ledger.unshift({dir:'in',amt:inAmt,note:'from Naivas'});
+    bubble('them','💰 You received <b>'+fmt(inAmt)+'</b> from <b>Naivas Supermarket</b> (salary).<br>Reply BALANCE to see your wallet.'); }, 900);
+  defaultQuick();
+}
+
+document.getElementById('form').addEventListener('submit', e=>{ e.preventDefault(); handle(document.getElementById('msg').value); });
+setUser('KE');
+</script>

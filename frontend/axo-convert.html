@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#0b141a">
+<title>Axo — Convert & Exchange</title>
+<style>
+  :root{
+    --wa-bg:#0b141a;--wa-header:#1f2c34;--wa-in:#1f2c34;--wa-out:#005c4b;
+    --wa-panel:#111b21;--wa-field:#2a3942;--axo:#25b573;--axo-deep:#0e8a52;
+    --txt:#e9edef;--txt-dim:#8696a0;--danger:#f0796b;--warn:#e8b84b;
+    --line:rgba(255,255,255,.06);
+    --font:'Segoe UI',system-ui,-apple-system,Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%}
+  body{font-family:var(--font);background:#000;color:var(--txt);display:flex;align-items:center;justify-content:center;min-height:100dvh}
+  .phone{width:100%;max-width:420px;height:100dvh;max-height:900px;background:var(--wa-bg);display:flex;flex-direction:column;position:relative;overflow:hidden}
+  @media(min-width:440px){.phone{border-radius:28px;box-shadow:0 24px 80px rgba(0,0,0,.6);border:1px solid #1a1a1a}}
+  .chat{flex:1;overflow-y:auto;overflow-x:hidden;padding:12px 10px 6px;background-image:radial-gradient(rgba(37,181,115,.05) 1px,transparent 1px);background-size:22px 22px}
+  .chat::-webkit-scrollbar{width:0}
+  .hdr{background:var(--wa-header);padding:10px 12px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--line);z-index:5}
+  .hdr .back{color:var(--txt-dim);font-size:20px;width:22px}
+  .hdr .ava{width:38px;height:38px;border-radius:50%;background:linear-gradient(135deg,var(--axo),var(--axo-deep));display:grid;place-items:center;font-weight:800;color:#fff;font-size:14px;position:relative}
+  .hdr .ava .v{position:absolute;right:-2px;bottom:-2px;width:14px;height:14px;border-radius:50%;background:#1f9be0;border:2px solid var(--wa-header);display:grid;place-items:center;font-size:7px;color:#fff}
+  .hdr .who{flex:1;line-height:1.2}.hdr .who b{font-size:15px;font-weight:600}.hdr .who span{font-size:11px;color:var(--txt-dim);display:block}
+  .hdr .ico{color:var(--txt-dim);font-size:17px;width:20px;text-align:center}
+  .row{display:flex;margin:3px 0;animation:pop .22s ease}.row.out{justify-content:flex-end}
+  @keyframes pop{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+  .bub{max-width:82%;padding:7px 9px 5px;border-radius:9px;font-size:14.3px;line-height:1.42;position:relative;box-shadow:0 1px 1px rgba(0,0,0,.18);word-wrap:break-word}
+  .row.in .bub{background:var(--wa-in);border-top-left-radius:2px}
+  .row.out .bub{background:var(--wa-out);border-top-right-radius:2px}
+  .bub .t{font-size:10px;color:var(--txt-dim);float:right;margin:4px 0 -2px 8px}.row.out .bub .t{color:#8fd6b4}
+  .bub b{font-weight:600}.tick{color:#53bdeb;font-size:11px;margin-left:2px}
+  .sys{align-self:center;background:#182229;color:var(--txt-dim);font-size:11px;padding:4px 11px;border-radius:8px;margin:8px auto;text-align:center;max-width:82%}
+  .acts{display:flex;flex-direction:column;gap:1px;margin:1px 0 6px;max-width:82%;animation:pop .25s ease}
+  .acts.center{align-self:center;max-width:88%;width:88%}
+  .act{background:var(--wa-in);color:var(--axo);border:none;border-top:1px solid var(--line);padding:11px;font-size:14px;font-weight:600;font-family:var(--font);display:flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;transition:background .12s}
+  .act:first-child{border-top:none;border-radius:9px 9px 0 0}.act:last-child{border-radius:0 0 9px 9px}.act:only-child{border-radius:9px}
+  .act:active{background:#26343d}.act .g{font-size:15px}.act.dim{color:var(--txt-dim)}
+  .card{background:var(--wa-in);border-radius:10px;overflow:hidden;max-width:88%;margin:3px 0 6px;animation:pop .25s ease;border:1px solid var(--line)}
+  .card.wide{width:88%}
+  .card-h{padding:11px 13px;background:linear-gradient(135deg,var(--axo-deep),#0a5c39);font-weight:700;font-size:13px;display:flex;align-items:center;gap:8px}
+  .card-b{padding:8px 13px 12px}
+  .recpt{font-size:13px}.recpt .rr{display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid var(--line)}
+  .recpt .rr:last-child{border-bottom:none}.recpt .rr span:first-child{color:var(--txt-dim);flex:none}
+  .recpt .rr span:last-child{font-weight:600;text-align:right}.recpt .big{font-size:17px}
+  .stamp{display:inline-flex;align-items:center;gap:6px;margin-top:4px;color:var(--axo);font-weight:700;font-size:14px}
+  .typing{display:flex;gap:3px;padding:11px 12px}
+  .typing i{width:7px;height:7px;border-radius:50%;background:var(--txt-dim);animation:blink 1.2s infinite}
+  .typing i:nth-child(2){animation-delay:.2s}.typing i:nth-child(3){animation-delay:.4s}
+  @keyframes blink{0%,60%,100%{opacity:.3}30%{opacity:1}}
+  .bar{background:var(--wa-panel);padding:7px 9px;display:flex;align-items:flex-end;gap:7px;border-top:1px solid var(--line)}
+  .bar .field{flex:1;background:var(--wa-field);border-radius:22px;display:flex;align-items:center;padding:9px 14px;gap:9px;min-height:44px}
+  .bar .field input{flex:1;background:none;border:none;outline:none;color:var(--txt);font-size:14.5px;font-family:var(--font)}
+  .bar .field input::placeholder{color:var(--txt-dim)}.bar .field .emo{color:var(--txt-dim);font-size:19px}
+  .bar .send{width:44px;height:44px;border-radius:50%;flex:none;border:none;cursor:pointer;background:var(--axo);color:#fff;font-size:19px;display:grid;place-items:center}
+  .restart{position:absolute;top:9px;right:52px;background:rgba(0,0,0,.25);border:1px solid var(--line);color:var(--txt-dim);font-size:10.5px;padding:4px 9px;border-radius:20px;cursor:pointer;z-index:9;font-family:var(--font)}
+
+  /* asset picker grid */
+  .assets{display:grid;grid-template-columns:1fr 1fr;gap:7px;padding:4px 0}
+  .apick{display:flex;align-items:center;gap:9px;background:var(--wa-field);border:1px solid transparent;border-radius:10px;padding:9px;cursor:pointer;transition:.12s}
+  .apick:active,.apick.on{border-color:var(--axo);background:rgba(37,181,115,.12)}
+  .apick .ai{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;font-weight:800;color:#fff;font-size:11px;flex:none}
+  .apick .an{font-size:13px;font-weight:600;line-height:1.15}.apick .an small{display:block;font-weight:400;font-size:10px;color:var(--txt-dim)}
+  .b-usd{background:#2e7d5b}.b-usdc{background:#2775ca}.b-usdt{background:#26a17b}.b-kes{background:#b5651d}.b-sos{background:#4a76c4}.b-eur{background:#5b53b5}
+
+  /* amount + live convert panel */
+  .cv{background:var(--wa-in);border:1px solid var(--line);border-radius:10px;padding:12px;max-width:90%;width:90%;margin:3px 0 6px;animation:pop .25s ease}
+  .cv-leg{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--txt-dim);margin-bottom:2px}
+  .cv-swap{width:30px;height:30px;border-radius:50%;background:var(--wa-field);border:none;color:var(--axo);font-size:15px;display:grid;place-items:center;margin:4px auto;cursor:pointer;transition:transform .2s}
+  .cv-swap:active{transform:rotate(180deg)}
+  .cv-disp{font-size:28px;font-weight:800;text-align:center;padding:2px 0;font-variant-numeric:tabular-nums}
+  .cv-disp small{font-size:14px;color:var(--txt-dim);font-weight:600}
+  .cv-get{text-align:center;font-size:13px;color:var(--txt-dim);margin-top:2px}
+  .cv-get b{color:var(--axo);font-size:20px;font-variant-numeric:tabular-nums}
+  .rate-line{display:flex;justify-content:space-between;font-size:11.5px;color:var(--txt-dim);margin-top:9px;padding-top:9px;border-top:1px dashed var(--line)}
+  .rate-line.fx b{color:var(--warn)}
+  .keys{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:9px}
+  .key{background:var(--wa-field);border:none;color:var(--txt);font-size:19px;font-weight:600;padding:12px 0;border-radius:9px;cursor:pointer;font-family:var(--font)}.key:active{background:#37474f}
+  .go{width:100%;margin-top:9px;background:var(--axo);color:#fff;border:none;padding:13px;border-radius:9px;font-size:15px;font-weight:700;cursor:pointer;font-family:var(--font)}
+  .go:disabled{background:#2a3942;color:var(--txt-dim)}
+  .err{color:var(--danger);font-size:11.5px;text-align:center;margin-top:6px;min-height:14px}
+  .quote-timer{font-size:11px;color:var(--warn);text-align:center;margin-top:6px}
+  a{color:var(--axo)}
+</style>
+</head>
+<body>
+<div class="phone">
+  <div class="hdr">
+    <div class="back">‹</div>
+    <div class="ava">ax<div class="v">✓</div></div>
+    <div class="who"><b>Axo</b><span id="presence">online</span></div>
+    <div class="ico">📞</div><div class="ico">⋮</div>
+  </div>
+  <button class="restart" onclick="boot()">↻ restart</button>
+  <div class="chat" id="chat"></div>
+  <div class="bar">
+    <div class="field"><span class="emo">☺</span><input id="txt" placeholder="Message Axo" autocomplete="off"><span class="emo">📎</span><span class="emo">📷</span></div>
+    <button class="send" id="sendBtn">➤</button>
+  </div>
+</div>
+<script>
+const chat=document.getElementById('chat'), txt=document.getElementById('txt');
+const now=()=>{const d=new Date();let h=d.getHours(),m=d.getMinutes();const ap=h>=12?'PM':'AM';h=h%12||12;return `${h}:${m<10?'0':''}${m} ${ap}`};
+const scroll=()=>chat.scrollTop=chat.scrollHeight;
+const wait=ms=>new Promise(r=>setTimeout(r,ms));
+
+/* ------- assets & rates -------
+   Same-dollar assets (USD/USDC/USDT) convert 1:1 minus a SPREAD (no market rate).
+   Fiat<->fiat is real FX with a moving RATE. ------- */
+const ASSET={
+  USD :{k:'USD', name:'US Dollar', sub:'Cash balance', cls:'b-usd', badge:'$', kind:'dollar'},
+  USDC:{k:'USDC',name:'USD Coin',  sub:'Stablecoin',  cls:'b-usdc',badge:'C', kind:'dollar'},
+  USDT:{k:'USDT',name:'Tether',    sub:'Stablecoin',  cls:'b-usdt',badge:'T', kind:'dollar'},
+  KES :{k:'KES', name:'Kenyan Shilling', sub:'Fiat', cls:'b-kes', badge:'Sh',kind:'fiat'},
+  SOS :{k:'SOS', name:'Somali Shilling',  sub:'Fiat', cls:'b-sos', badge:'S', kind:'fiat'},
+};
+// mid-market FX to 1 USD (demo)
+const USD_TO={KES:129.4, SOS:571.0, USD:1, USDC:1, USDT:1};
+// spread applied on dollar<->dollar swaps
+const DOLLAR_SPREAD=0.001;   // 0.10%
+// margin baked into FX + flat-ish fee
+const FX_MARGIN=0.015;       // 1.5% off mid-market
+const FX_FEE_PCT=0.005;
+
+let S={};
+function reset(){ S={bal:{USD:1250,USDC:350,USDT:100,KES:0,SOS:0}}; chat.innerHTML=''; }
+
+function inBub(h,t=true){const r=document.createElement('div');r.className='row in';r.innerHTML=`<div class="bub">${h}${t?`<span class="t">${now()}</span>`:''}</div>`;chat.appendChild(r);scroll();return r;}
+function outBub(h){const r=document.createElement('div');r.className='row out';r.innerHTML=`<div class="bub">${h}<span class="t">${now()} <span class="tick">✓✓</span></span></div>`;chat.appendChild(r);scroll();return r;}
+function sys(t){const d=document.createElement('div');d.className='sys';d.textContent=t;chat.appendChild(d);scroll();}
+function raw(n){chat.appendChild(n);scroll();return n;}
+async function typing(ms=800){document.getElementById('presence').textContent='typing…';const r=document.createElement('div');r.className='row in';r.innerHTML=`<div class="bub" style="padding:0"><div class="typing"><i></i><i></i><i></i></div></div>`;chat.appendChild(r);scroll();await wait(ms);r.remove();document.getElementById('presence').textContent='online';}
+function actions(list,{center=false}={}){const w=document.createElement('div');w.className='acts'+(center?' center':'');list.forEach(a=>{const b=document.createElement('button');b.className='act'+(a.dim?' dim':'');b.innerHTML=`${a.g?`<span class="g">${a.g}</span>`:''}${a.label}`;b.onclick=()=>{w.remove();a.fn();};w.appendChild(b);});return raw(w);}
+function fmt(n,d=2){return Number(n).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});}
+function money(k,n){const a=ASSET[k];if(k==='USD')return '$'+fmt(n);if(a.kind==='fiat')return fmt(n,0)+' '+k;return fmt(n)+' '+k;}
+
+/* ---------- boot ---------- */
+async function boot(){
+  reset();
+  sys('Today'); sys('🔒 End-to-end encrypted');
+  await wait(300); await typing(600);
+  inBub(`Hi Ahmed 👋 What would you like to convert today?`);
+  await wait(200);
+  chooseType();
+}
+
+/* Step 1: what kind of conversion — honest split */
+function chooseType(){
+  inBub(`Pick what you're doing:`);
+  actions([
+    {g:'🔄',label:'Swap dollars (USD · USDC · USDT)', fn:()=>startConvert('dollar')},
+    {g:'💱',label:'Change to local currency (FX)', fn:()=>startConvert('fx')},
+    {g:'💰',label:'See my balances', dim:true, fn:showBal},
+  ]);
+}
+async function showBal(){
+  outBub('See my balances');
+  await typing(500);
+  const rows=Object.keys(S.bal).filter(k=>S.bal[k]>0||['USD','USDC','USDT'].includes(k))
+    .map(k=>`<div class="recpt"><div class="rr"><span>${ASSET[k].name}</span><span>${money(k,S.bal[k])}</span></div></div>`).join('');
+  const c=document.createElement('div');c.className='card wide';
+  c.innerHTML=`<div class="card-h">💰 My balances</div><div class="card-b">${rows}</div>`;
+  raw(c); chooseType();
+}
+
+/* Step 2: build the panel. mode: 'dollar' | 'fx' */
+async function startConvert(mode){
+  outBub(mode==='dollar'?'🔄 Swap dollars':'💱 Change to local currency');
+  await typing(600);
+
+  // default legs per mode
+  let from = mode==='dollar' ? 'USDC' : 'USD';
+  let to   = mode==='dollar' ? 'USDT' : 'KES';
+  const fromOpts = mode==='dollar' ? ['USD','USDC','USDT'] : ['USD','USDC','USDT'];
+  const toOpts   = mode==='dollar' ? ['USD','USDC','USDT'] : ['KES','SOS'];
+
+  inBub(mode==='dollar'
+    ? `These are all US dollars, so it's 1-to-1 minus a small <b>${(DOLLAR_SPREAD*100).toFixed(2)}%</b> spread. No market rate to watch.`
+    : `This is a currency exchange, so a <b>live rate</b> applies. We lock it for 60 seconds when you confirm.`);
+
+  const panel=document.createElement('div'); panel.className='cv';
+  panel.innerHTML=`
+    <div class="cv-leg">From <span id="fromLbl" style="margin-left:auto;color:var(--axo);font-weight:700"></span></div>
+    <div class="assets" id="fromRow"></div>
+    <div class="cv-disp"><small id="fromSym"></small><span id="disp">0</span></div>
+    <button class="cv-swap" id="swap" title="Switch">⇅</button>
+    <div class="cv-leg">To <span id="toLbl" style="margin-left:auto;color:var(--axo);font-weight:700"></span></div>
+    <div class="assets" id="toRow"></div>
+    <div class="cv-get">You get <b id="getAmt">0</b> <span id="getCur"></span></div>
+    <div class="rate-line ${mode==='fx'?'fx':''}" id="rateLine"></div>
+    <div class="keys">${['1','2','3','4','5','6','7','8','9','.','0','⌫'].map(x=>`<button class="key" data-k="${x}">${x}</button>`).join('')}</div>
+    <div class="err" id="err"></div>
+    <button class="go" id="go" disabled>Get quote</button>`;
+  const node=raw(panel);
+
+  let val='0';
+  const $=s=>node.querySelector(s);
+  function renderPickers(){
+    $('#fromRow').innerHTML=fromOpts.map(k=>chipHtml(k,k===from)).join('');
+    $('#toRow').innerHTML=toOpts.map(k=>chipHtml(k,k===to)).join('');
+    $('#fromRow').querySelectorAll('.apick').forEach(el=>el.onclick=()=>{from=el.dataset.k; if(from===to&&mode==='dollar'){to=toOpts.find(x=>x!==from);} refresh();});
+    $('#toRow').querySelectorAll('.apick').forEach(el=>el.onclick=()=>{to=el.dataset.k; if(to===from&&mode==='dollar'){from=fromOpts.find(x=>x!==to);} refresh();});
+  }
+  function chipHtml(k,on){const a=ASSET[k];return `<div class="apick ${on?'on':''}" data-k="${k}"><div class="ai ${a.cls}">${a.badge}</div><div class="an">${k}<small>${a.sub}</small></div></div>`;}
+
+  function quote(amount){
+    if(mode==='dollar'){
+      const out=amount*(1-DOLLAR_SPREAD);
+      return {out, rate:1, feeLabel:`Spread ${(DOLLAR_SPREAD*100).toFixed(2)}%`, feeVal:amount-out};
+    } else {
+      // USD-equiv of the 'from' leg (from is always a dollar asset here)
+      const usd=amount; // from ∈ dollar assets = 1:1 USD
+      const mid=USD_TO[to];
+      const applied=mid*(1-FX_MARGIN);
+      const gross=usd*applied;
+      const fee=gross*FX_FEE_PCT;
+      return {out:gross-fee, rate:applied, mid, feeLabel:`FX fee ${(FX_FEE_PCT*100).toFixed(1)}%`, feeVal:fee};
+    }
+  }
+
+  function refresh(){
+    const a=ASSET[from], b=ASSET[to];
+    $('#fromLbl').textContent=a.name; $('#toLbl').textContent=b.name;
+    $('#fromSym').textContent=from==='USD'?'$':'';
+    $('#disp').textContent=val;
+    $('#getCur').textContent=to;
+    renderPickers();
+    const n=parseFloat(val)||0;
+    const q=quote(n);
+    $('#getAmt').textContent = b.kind==='fiat'?fmt(q.out,0):fmt(q.out);
+    // rate line
+    if(mode==='dollar'){
+      $('#rateLine').innerHTML=`<span>${q.feeLabel}</span><span>${money(from,q.feeVal)}</span>`;
+    } else {
+      $('#rateLine').innerHTML=`<span>Rate <b>1 USD = ${fmt(q.rate,2)} ${to}</b></span><span style="color:var(--txt-dim)">mid ${fmt(q.mid,2)}</span>`;
+    }
+    // validation
+    const avail=S.bal[from]||0;
+    const err=$('#err'), go=$('#go');
+    if(n>avail){err.textContent=`Not enough ${from}. You have ${money(from,avail)}.`;go.disabled=true;}
+    else if(n<=0){err.textContent='';go.disabled=true;}
+    else{err.textContent='';go.disabled=false;}
+    go.textContent = mode==='fx' ? 'Lock rate & continue' : 'Continue';
+  }
+
+  node.querySelectorAll('.key').forEach(bn=>bn.onclick=()=>{
+    const k=bn.dataset.k;
+    if(k==='⌫')val=val.length>1?val.slice(0,-1):'0';
+    else if(k==='.'){if(!val.includes('.'))val+='.';}
+    else{if(val==='0')val=k;else if(!(val.includes('.')&&val.split('.')[1].length>=2))val+=k;}
+    refresh();
+  });
+  $('#swap').onclick=()=>{
+    if(mode==='dollar'){const t=from;from=to;to=t;refresh();}
+    else{inBub2(`To send local currency the other way (KES → USD) you'd use Cash-in or a bank deposit — that's a separate flow.`);}
+  };
+  $('#go').onclick=()=>{
+    const n=parseFloat(val)||0; const q=quote(n);
+    node.remove();
+    confirmConvert({mode,from,to,amount:n,q});
+  };
+  refresh();
+}
+async function inBub2(h){await typing(400);inBub(h);}
+
+async function confirmConvert(d){
+  outBub(`${money(d.from,d.amount)} → ${d.to}`);
+  await typing(700);
+  const isFx=d.mode==='fx';
+  inBub(isFx?`Here's your locked quote. It's valid for 60 seconds.`:`Please confirm this swap:`);
+  const c=document.createElement('div');c.className='card wide';
+  c.innerHTML=`
+    <div class="card-h">${isFx?'💱 Exchange quote':'🔄 Confirm swap'}</div>
+    <div class="card-b recpt">
+      <div class="rr"><span>You pay</span><span class="big">${money(d.from,d.amount)}</span></div>
+      <div class="rr"><span>You get</span><span class="big" style="color:var(--axo)">${money(d.to,d.q.out)}</span></div>
+      ${isFx?`<div class="rr"><span>Rate (locked)</span><span>1 USD = ${fmt(d.q.rate,2)} ${d.to}</span></div>`:''}
+      <div class="rr"><span>${d.q.feeLabel}</span><span>${isFx?money('USD',d.q.feeVal/d.q.rate):money(d.from,d.q.feeVal)}</span></div>
+    </div>`;
+  raw(c);
+  if(isFx){
+    const timer=document.createElement('div');timer.className='quote-timer';let s=60;
+    timer.textContent=`⏳ Rate locked · 0:${s} remaining`;raw(timer);
+    const iv=setInterval(()=>{s--;timer.textContent=`⏳ Rate locked · 0:${s<10?'0':''}${s} remaining`;if(s<=0){clearInterval(iv);timer.textContent='⏳ Quote expired';}},1000);
+    S._iv=iv;
+  }
+  actions([
+    {g:'✅',label:isFx?'Accept rate & exchange':'Confirm swap', fn:()=>doConvert(d)},
+    {g:'✕',label:'Cancel', dim:true, fn:()=>{if(S._iv)clearInterval(S._iv);cancelC();}},
+  ],{center:true});
+}
+async function cancelC(){outBub('Cancel');await typing(400);inBub('No problem — nothing changed.');chooseType();}
+
+async function doConvert(d){
+  if(S._iv)clearInterval(S._iv);
+  outBub('✅ Confirm');
+  await typing(1100);
+  S.bal[d.from]=+(S.bal[d.from]-d.amount).toFixed(2);
+  S.bal[d.to]=+((S.bal[d.to]||0)+d.q.out).toFixed(ASSET[d.to].kind==='fiat'?0:2);
+  const ref='AXO'+Math.floor(100000+Math.random()*900000);
+  const c=document.createElement('div');c.className='card wide';
+  c.innerHTML=`
+    <div class="card-h" style="background:linear-gradient(135deg,#0e8a52,#0a5c39)">🧾 ${d.mode==='fx'?'Exchange complete':'Swap complete'}</div>
+    <div class="card-b recpt">
+      <div class="stamp">✅ ${money(d.from,d.amount)} → ${money(d.to,d.q.out)}</div>
+      <div class="rr" style="margin-top:6px"><span>New ${d.from}</span><span>${money(d.from,S.bal[d.from])}</span></div>
+      <div class="rr"><span>New ${d.to}</span><span>${money(d.to,S.bal[d.to])}</span></div>
+      <div class="rr"><span>Reference</span><span>${ref}</span></div>
+      <div class="rr"><span>Time</span><span>${now()}</span></div>
+    </div>`;
+  raw(c);
+  await wait(400);
+  await typing(500);
+  inBub(`Done. Anything else?`);
+  chooseType();
+}
+
+/* free text */
+document.getElementById('sendBtn').onclick=fire;
+txt.addEventListener('keydown',e=>{if(e.key==='Enter')fire();});
+function fire(){const v=txt.value.trim();txt.value='';if(!v)return;outBub(v);const l=v.toLowerCase();
+  if(/fx|shilling|kes|sos|local|exchange/.test(l))return startConvert('fx');
+  if(/swap|usdc|usdt|convert|crypto|stable/.test(l))return startConvert('dollar');
+  if(/balance/.test(l))return showBal();
+  (async()=>{await typing(500);inBub('Tap an option below to convert.');chooseType();})();
+}
+boot();
+</script>
+</body>
+</html>

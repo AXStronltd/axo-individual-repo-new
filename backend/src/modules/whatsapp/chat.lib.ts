@@ -1,0 +1,63 @@
+// Pure, DB-free helpers for a friendlier, safer chat — testable without a DB.
+
+// Minor-unit decimals by currency. KES/UGX/TZS are zero-decimal in practice;
+// USD/EUR are 2. Somalia uses USD. Extend as markets are added.
+const ZERO_DECIMAL = new Set(['KES', 'UGX', 'TZS', 'RWF', 'SOS']);
+export function currencyDecimals(currency: string): number {
+  return ZERO_DECIMAL.has((currency || '').toUpperCase()) ? 0 : 2;
+}
+
+/** Parse a human amount string into minor units for the given currency. */
+export function amountToMinor(amount: string, currency: string): bigint | null {
+  const dec = currencyDecimals(currency);
+  const s = (amount || '').replace(/,/g, '').trim();
+  if (!/^\d+(\.\d+)?$/.test(s)) return null;
+  const [whole, frac = ''] = s.split('.');
+  const fracPadded = (frac + '0'.repeat(dec)).slice(0, dec);
+  const minor = BigInt((whole || '0') + (dec > 0 ? fracPadded : ''));
+  return minor > 0n ? minor : null;
+}
+
+/** Format minor units back to a display string for the currency. */
+export function formatAmount(minor: bigint, currency: string): string {
+  const dec = currencyDecimals(currency);
+  const neg = minor < 0n; const abs = neg ? -minor : minor;
+  const s = abs.toString().padStart(dec + 1, '0');
+  const whole = s.slice(0, s.length - dec) || '0';
+  const withSep = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  const frac = dec > 0 ? '.' + s.slice(s.length - dec) : '';
+  return `${currency} ${neg ? '-' : ''}${withSep}${frac}`;
+}
+
+/**
+ * When a message doesn't match a command, try to detect loosely what the person
+ * WANTS and return a gentle nudge toward the right command — instead of a flat
+ * "I didn't catch that". Returns null if we truly can't tell. Multi-lingual on
+ * the common verbs (English, Swahili, Somali).
+ */
+export function coachUnknown(text: string): string | null {
+  const l = (text || '').toLowerCase();
+  if (!l.trim()) return null;
+
+  // wants to send money
+  if (/\b(send|sending|transfer|tuma|kutuma|dir|bixi|lacag ?dir|wixii)\b/.test(l) && !/\b(till|paybill|business|biashara)\b/.test(l)) {
+    return 'To send money, reply:\n• SEND <amount> to @tag  (to an Axo user)\n• SENDTO <phone> <amount>  (to anyone)';
+  }
+  // wants to pay a business
+  if (/\b(pay|paying|buy|duka|biashara|business|shop|till|paybill)\b/.test(l)) {
+    return 'To pay a business, reply:\n• TILL <number> <amount>\n• PAYBILL <number> <account> <amount>';
+  }
+  // wants their balance
+  if (/\b(how much|balance|money|do i have|nina|pesa ngapi|lacagta|ngapi)\b/.test(l)) {
+    return 'To see your balance, just reply BALANCE.';
+  }
+  // wants history
+  if (/\b(history|statement|transactions|last|recent|taariikh|historia)\b/.test(l)) {
+    return 'For your recent transactions, reply MINI or HISTORY.';
+  }
+  // greetings / lost
+  if (/\b(hi|hello|hey|start|habari|salaan|iska warran|mambo)\b/.test(l)) {
+    return null; // let the menu handle greetings
+  }
+  return null;
+}

@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Axo Simulator — sender & receiver, reflected live</title>
+<style>
+  :root{
+    --bg:#070b10;--panel:#0d141d;--line:rgba(255,255,255,.08);
+    --axo:#25b573;--txt:#e9edef;--dim:#8696a0;
+    --font:'Segoe UI',system-ui,-apple-system,Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);font-family:var(--font)}
+  body{display:flex;flex-direction:column;min-height:100dvh}
+  .simbar{display:flex;align-items:center;gap:12px;padding:12px 18px;border-bottom:1px solid var(--line);background:var(--panel);position:sticky;top:0;z-index:10}
+  .simbar .logo{width:32px;height:32px;border-radius:9px;background:linear-gradient(135deg,var(--axo),#0e8a52);display:grid;place-items:center;font-weight:800;color:#fff;font-size:14px}
+  .simbar b{font-size:16px}
+  .simbar .sub{font-size:12px;color:var(--dim);flex:1}
+  .simbar .flow{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--dim)}
+  .simbar .flow .arr{color:var(--axo);animation:pulse 1.6s ease-in-out infinite}
+  @keyframes pulse{0%,100%{opacity:.4;transform:translateX(-2px)}50%{opacity:1;transform:translateX(2px)}}
+  .stage{flex:1;display:flex;gap:18px;padding:18px;justify-content:center;align-items:flex-start;flex-wrap:wrap;overflow:auto}
+  .device{display:flex;flex-direction:column;align-items:center;gap:10px}
+  .device .tag{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700;padding:7px 14px;border-radius:20px;border:1px solid var(--line)}
+  .tag.sender{background:rgba(37,181,115,.1);color:var(--axo)}
+  .tag.receiver{background:rgba(74,144,217,.12);color:#7fb4ec}
+  .tag .dot{width:8px;height:8px;border-radius:50%;background:currentColor}
+  .frame{width:390px;max-width:94vw;height:800px;max-height:82vh;border-radius:30px;overflow:hidden;border:8px solid #1a1a1a;box-shadow:0 24px 70px rgba(0,0,0,.6);background:#000}
+  .frame iframe{width:100%;height:100%;border:none;display:block}
+  .relay{position:fixed;bottom:14px;left:50%;transform:translateX(-50%);background:var(--axo);color:#062015;font-weight:700;font-size:13px;padding:10px 18px;border-radius:22px;box-shadow:0 8px 30px rgba(37,181,115,.4);opacity:0;transition:opacity .3s;pointer-events:none;z-index:20}
+  .relay.on{opacity:1}
+  .hint{width:100%;text-align:center;font-size:12px;color:var(--dim);padding:0 18px 14px;line-height:1.6}
+  .hint b{color:var(--txt)}
+  @media(max-width:860px){.frame{height:680px}}
+</style>
+</head>
+<body>
+  <div class="simbar">
+    <div class="logo">ax</div>
+    <b>Axo Simulator</b>
+    <div class="sub">Two users, one network — watch sender &amp; receiver reflect each other live.</div>
+    <div class="flow"><span>Sender</span><span class="arr">→</span><span>money</span><span class="arr">→</span><span>Receiver</span></div>
+  </div>
+
+  <div class="hint">
+    Onboard <b>both</b> phones (tap “Axo ✔︎” → create account). Then on the <b>left</b>, send money to a contact who is <b>on Axo</b> (e.g. Hassan) — watch it appear as <b>received</b> on the right. Requests work too: request on one side → the other can pay.
+  </div>
+
+  <div class="stage">
+    <div class="device">
+      <div class="tag sender"><span class="dot"></span>Sender · Axo Individual</div>
+      <div class="frame"><iframe id="fA" src="axo.html"></iframe></div>
+    </div>
+    <div class="device">
+      <div class="tag receiver"><span class="dot"></span>Receiver · Axo Individual</div>
+      <div class="frame"><iframe id="fB" src="axo.html"></iframe></div>
+    </div>
+  </div>
+
+  <div class="relay" id="relay"></div>
+
+<script>
+  const fA=document.getElementById('fA'), fB=document.getElementById('fB');
+  const relay=document.getElementById('relay');
+  let relayT;
+  function flash(msg){
+    relay.textContent=msg; relay.classList.add('on');
+    clearTimeout(relayT); relayT=setTimeout(()=>relay.classList.remove('on'),2200);
+  }
+  // Relay events between the two phones. Each phone posts to window.parent (this shell);
+  // we forward to the OTHER phone. Sender emits → receiver reflects.
+  window.addEventListener('message', ev=>{
+    const d=ev.data; if(!d||!d.__axo) return;
+    const from = ev.source===fA.contentWindow ? fA : (ev.source===fB.contentWindow ? fB : null);
+    if(!from) return;
+    const other = from===fA ? fB : fA;
+    try{ other.contentWindow.postMessage(d, '*'); }catch(e){}
+    // visual relay indicator
+    const dir = from===fA ? 'Left → Right' : 'Right → Left';
+    if(d.type==='incoming-payment') flash(`💸 ${dir}: payment of ${money(d.payload)} reflected`);
+    else if(d.type==='incoming-request') flash(`📥 ${dir}: request for ${money(d.payload)} reflected`);
+  });
+  function money(p){const a=p.asset||'USD';return (a==='USD'?'$':'')+Number(p.amount).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+(a!=='USD'?' '+a:'');}
+</script>
+</body>
+</html>
