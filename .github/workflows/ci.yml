@@ -1,0 +1,118 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Test-only values. Nothing here is a real secret: CI runs in sandbox mode
+# against a throwaway database that exists only for the length of the job.
+env:
+  APP_ENV: sandbox
+  DATABASE_URL: postgresql://axo:axo@localhost:5432/axo_ci?schema=public
+  JWT_SECRET: ci-access-secret-not-for-production
+  JWT_REFRESH_SECRET: ci-refresh-secret-not-for-production
+  ARGON2_PEPPER: ci-pepper
+
+jobs:
+  backend:
+    name: Backend — typecheck, build, tests (with Postgres)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: axo
+          POSTGRES_PASSWORD: axo
+          POSTGRES_DB: axo_ci
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U axo" --health-interval 5s --health-timeout 5s --health-retries 20
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - run: npx prisma generate
+      - name: Apply migrations to a fresh database
+        run: npx prisma migrate deploy
+      - name: Schema and migrations agree (no un-migrated schema changes)
+        run: npx prisma migrate diff --from-url "$DATABASE_URL" --to-schema-datamodel prisma/schema.prisma --exit-code
+      - run: npm run typecheck
+      - run: npm run build
+      - name: Unit + database end-to-end tests
+        run: npm test
+
+  wallet-e2e:
+    name: Wallet — browser end-to-end (headless Chrome)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: axo
+          POSTGRES_PASSWORD: axo
+          POSTGRES_DB: axo_ci
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U axo" --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Frontend scripts parse
+        run: |
+          node --check frontend/live.js
+          node -e "const s=require('fs').readFileSync('frontend/index.html','utf8');const b=[...s.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m=>m[1]);require('fs').writeFileSync('/tmp/inline.js',b.join('\n;\n'))"
+          node --check /tmp/inline.js
+      - name: Install, migrate, seed, build
+        working-directory: backend
+        run: |
+          npm ci
+          npx prisma generate
+          npx prisma migrate deploy
+          cp .env.example .env   # the job's env above takes precedence over this file
+          npm run seed
+          npm run build
+      - name: Start the API and serve the wallet
+        run: |
+          (cd backend && PORT=4000 node dist/server.js > /tmp/api.log 2>&1 &)
+          (cd frontend && python3 -m http.server 8766 --bind 127.0.0.1 > /tmp/web.log 2>&1 &)
+          for i in $(seq 1 60); do curl -sf localhost:4000/health && break; sleep 1; done
+          curl -sf localhost:4000/health
+          curl -sf -o /dev/null http://127.0.0.1:8766/index.html
+      - name: Drive the wallet chat in headless Chrome
+        env:
+          WALLET_URL: http://127.0.0.1:8766/index.html?api=http://localhost:4000
+          API_URL: http://localhost:4000
+          CHROME_BIN: /usr/bin/google-chrome
+          E2E_OUT: e2e/out
+        run: node e2e/wallet.e2e.mjs
+      - name: API log
+        if: failure()
+        run: cat /tmp/api.log
+      - name: Screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wallet-e2e-screenshots
+          path: e2e/out
+          if-no-files-found: ignore
