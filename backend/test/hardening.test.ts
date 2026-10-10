@@ -4,6 +4,7 @@ import { signPayload, verifyPayloadSignature, nextBackoffMs } from '../src/modul
 import { encodeQr, parseQr } from '../src/modules/collect/collect.lib.js';
 import { apiKeyPrefix, hashApiKey } from '../src/middleware/auth.js';
 import { isClearingTag } from '../src/modules/p2p/p2p.lib.js';
+import { buildApp } from '../src/app.js';
 
 const base = {
   APP_ENV: 'live' as const, PORT: 4000, DATABASE_URL: 'postgres://x', REDIS_URL: undefined,
@@ -93,5 +94,15 @@ describe('API keys and clearing tags', () => {
   it('recognises the internal clearing wallets', () => {
     expect(isClearingTag('@axo_clearing_kes')).toBe(true);
     expect(isClearingTag('@amina')).toBe(false);
+  });
+});
+
+describe('service root', () => {
+  it('GET / answers with what the service is, not a 404', async () => {
+    const app = buildApp();
+    const res = await app.inject({ method: 'GET', url: '/' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ service: 'Axo API', status: 'ok', health: '/health' });
+    await app.close();
   });
 });
