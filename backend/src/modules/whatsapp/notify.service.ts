@@ -1,6 +1,6 @@
 import { prisma } from '../../db/client.js';
 import { makeSender } from './whatsapp.sender.js';
-import { formatMinor } from '../../lib/money.js';
+import { formatAmount } from './chat.lib.js';
 
 const sender = makeSender();
 
@@ -23,8 +23,7 @@ export async function notifyCredit(params: {
     if (!sender.available) return;
     const link = await prisma.whatsAppLink.findUnique({ where: { customerId: params.customerId } });
     if (!link?.waId) return;
-    const decimals = params.currency === 'USD' ? 2 : 0;
-    const amt = `${params.currency} ${formatMinor(params.amountMinor, decimals)}`;
+    const amt = formatAmount(params.amountMinor, params.currency);
     const verb: Record<string, string> = {
       payment: `💰 You received ${amt} from ${params.from}.`,
       refund: `↩️ ${params.from} refunded you ${amt}.`,

@@ -26,4 +26,4 @@ Each fix is tested by asserting that money did **not** move (`backend/test/payme
 
 Funding and withdrawal rails, an e-money licence or a licensed partner, WhatsApp production approval from Meta, a KYC provider, a biller aggregator, crypto custody, and a sanctions-screening feed.
 
-**Currency units:** KES, UGX, TZS, RWF and SOS are treated as zero-decimal here (the minor unit is a whole shilling). ISO 4217 gives KES two decimals. Decide this before launch.
+**Currency units — decided:** KES (and UGX, TZS, RWF, SOS) are kept in whole shillings, with no cents. Other currencies use their normal decimals. Somalia transacts in USD, in cents (a +252 number gets a USD wallet). An amount more precise than its currency (e.g. `KES 12.50`) is refused, never rounded. The WhatsApp HISTORY, MINI and credit messages now show USD with cents.

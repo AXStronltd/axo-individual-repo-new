@@ -4,7 +4,12 @@ How a till, POS or back office takes Axo payments: raise a **payment request** f
 
 > **Status:** sandbox. Everything below runs end to end against the sandbox and Postgres (`backend/test/payment-requests.e2e.test.ts`). It hasn't been run against live money. Payments between Axo wallets settle on Axo's own ledger. Getting money *into* wallets in production needs a funding rail and licensing (see `SECURITY.md`).
 
-Base URL: wherever the backend runs (`http://localhost:4000` in development). All bodies are JSON. **Amounts are integer strings in minor units.** In this codebase KES, UGX, TZS, RWF and SOS are zero-decimal (minor unit = 1 shilling); USD is two-decimal (cents).
+Base URL: wherever the backend runs (`http://localhost:4000` in development). All bodies are JSON. **Amounts are integer strings in minor units:**
+
+| Currency | Minor unit | `"1250"` means |
+|---|---|---|
+| KES (also UGX, TZS, RWF, SOS) | 1 shilling (no cents) | KES 1,250 |
+| USD (Somalia transacts in USD) | 1 cent | USD 12.50 |
 
 ## 1. Authenticate the till
 

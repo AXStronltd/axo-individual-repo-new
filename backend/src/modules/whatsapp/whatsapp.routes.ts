@@ -21,7 +21,7 @@ import { sendToUnregistered, refundClaimable, claimTransfer, claimByIdentity } f
 import { setPin, hasPin } from '../p2p/pin.service.js';
 import { formatMiniStatement } from '../p2p/statement.lib.js';
 import { stageConfirm, resolveConfirm, cancelConfirm, hasPendingConfirm } from './confirm.service.js';
-import { amountToMinor, formatAmount, coachUnknown } from './chat.lib.js';
+import { amountToMinor, formatAmount, coachUnknown, currencyDecimals, countryCurrencyFor } from './chat.lib.js';
 import { startCashOut } from '../cash/cash.service.js';
 import { agentCashOut } from '../agent/agent.service.js';
 import { buyBiller } from '../billers/billers.service.js';
@@ -29,7 +29,6 @@ import { reverseTransfer } from '../p2p/reversal.service.js';
 import { verifyPin } from '../p2p/pin.service.js';
 import { normalizeTag, normalizeWaId, CLEARING_TAG_PREFIX } from '../p2p/p2p.lib.js';
 import { prisma } from '../../db/client.js';
-import { formatMinor } from '../../lib/money.js';
 import { notifyMerchantPaid } from '../notify/merchant.notify.js';
 
 const sender = makeSender();
@@ -206,7 +205,7 @@ async function routeMessage(waId: string, text: string) {
     if (!xfers.length) return reply_safe(waId, 'No transactions yet.');
     const lines = xfers.map((x: any) => {
       const out = x.senderId === customer.id;
-      return `${out ? '−' : '+'} ${customer.currency} ${formatMinor(x.amountMinor, 0)} · ${x.status}`;
+      return `${out ? '−' : '+'} ${formatAmount(x.amountMinor, customer.currency)} · ${x.status}`;
     });
     return reply_safe(waId, '🧾 Recent:\n' + lines.join('\n'));
   }
@@ -222,7 +221,7 @@ async function routeMessage(waId: string, text: string) {
       orderBy: { createdAt: 'desc' }, take: 5,
     });
     const mapped = rows.map((x: any) => ({ direction: x.senderId === customer.id ? 'out' as const : 'in' as const, amountMinor: x.amountMinor, status: x.status, note: x.note }));
-    return reply_safe(waId, formatMiniStatement(mapped, customer.currency, 0));
+    return reply_safe(waId, formatMiniStatement(mapped, customer.currency, currencyDecimals(customer.currency)));
   }
 
   if (intent.kind === 'recall') {
@@ -481,15 +480,6 @@ async function executeConfirmed(waId: string, customer: any, p: any) {
     } catch (e) { return reply_safe(waId, `Couldn't pay the bill: ${(e as Error).message}.`); }
     return;
   }
-}
-
-/** Infer a new user's country+currency from their phone prefix. Somalia = USD. */
-function countryCurrencyFor(digits: string): { country: string; currency: string } {
-  if (digits.startsWith('252')) return { country: 'SO', currency: 'USD' }; // Somalia uses USD
-  if (digits.startsWith('255')) return { country: 'TZ', currency: 'TZS' };
-  if (digits.startsWith('256')) return { country: 'UG', currency: 'UGX' };
-  if (digits.startsWith('254')) return { country: 'KE', currency: 'KES' };
-  return { country: 'KE', currency: 'KES' }; // default
 }
 
 /** Create a wallet-holder for a WhatsApp number and link+verify it. */

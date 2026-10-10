@@ -51,7 +51,9 @@ const ids = {
   apiKey: '', apiKeyId: '',
   webhookSecret: '',
   till: '',
+  merchantSO: '', ownerSO: '', somali: '', soTill: '',
 };
+const somaliWaId = '2526' + run.replace(/\D/g, '').padEnd(8, '3').slice(0, 8);
 const payerWaId = '2547' + run.replace(/\D/g, '').padEnd(8, '7').slice(0, 8);
 
 const auth = (t: string) => ({ authorization: `Bearer ${t}` });
@@ -124,11 +126,28 @@ d('Payment requests — the customer → merchant target flow', () => {
     const till = await app.inject({ method: 'POST', url: '/paynumbers', headers: auth(ids.ownerA), payload: { kind: 'till', label: 'Front till' } });
     expect(till.statusCode).toBe(201);
     ids.till = till.json().number;
+
+    // Somalia: a USD business and a USD wallet (cents), linked on a +252 number.
+    const so = await app.inject({
+      method: 'POST', url: '/merchants',
+      payload: { legalName: `PR so ${run} Ltd`, tradingName: `PR so ${run}`, country: 'SO', currency: 'USD', owner: { name: 'Owner', email: `owner-so-${run}@e2e.test`, password: 'password123' } },
+    });
+    ids.merchantSO = so.json().id;
+    ids.ownerSO = (await app.inject({ method: 'POST', url: '/auth/login', payload: { email: `owner-so-${run}@e2e.test`, password: 'password123' } })).json().accessToken;
+    ids.soTill = (await app.inject({ method: 'POST', url: '/paynumbers', headers: auth(ids.ownerSO), payload: { kind: 'till' } })).json().number;
+    const somali = await prisma.customer.create({
+      data: {
+        axoTag: `@prs${run}`, displayName: 'Somali payer', country: 'SO', currency: 'USD', status: 'active', kycTier: 'verified',
+        pinHash: await hash(PIN), wallet: { create: { currency: 'USD', balanceMinor: 10_000n } }, // USD 100.00
+        waLink: { create: { waId: somaliWaId, phone: somaliWaId, verifiedAt: new Date(), sessionExpiresAt: new Date(Date.now() + 600_000) } },
+      },
+    });
+    ids.somali = somali.id;
   });
 
   afterAll(async () => {
-    const merchants = [ids.merchantA, ids.merchantB].filter(Boolean);
-    const customers = [ids.payer, ids.other].filter(Boolean);
+    const merchants = [ids.merchantA, ids.merchantB, ids.merchantSO].filter(Boolean);
+    const customers = [ids.payer, ids.other, ids.somali].filter(Boolean);
     const transfers = await prisma.p2PTransfer.findMany({ where: { OR: [{ senderId: { in: customers } }, { recipientId: { in: customers } }] } });
     for (const t of transfers) await prisma.customerLedgerEntry.deleteMany({ where: { transferId: t.id } });
     await prisma.p2PTransfer.deleteMany({ where: { id: { in: transfers.map((t) => t.id) } } });
@@ -139,7 +158,7 @@ d('Payment requests — the customer → merchant target flow', () => {
     await prisma.merchantWebhook.deleteMany({ where: { merchantId: { in: merchants } } });
     await prisma.apiKey.deleteMany({ where: { merchantId: { in: merchants } } });
     await prisma.pushPrompt.deleteMany({ where: { merchantId: { in: merchants } } });
-    await prisma.pendingConfirm.deleteMany({ where: { waId: payerWaId } });
+    await prisma.pendingConfirm.deleteMany({ where: { waId: { in: [payerWaId, somaliWaId] } } });
     await prisma.whatsAppLink.deleteMany({ where: { customerId: { in: customers } } });
     await prisma.riskCase.deleteMany({ where: { subjectId: { in: [...customers, ...transfers.map((t) => t.id)] } } });
     await prisma.payNumberLine.deleteMany({ where: { payNumber: { merchantId: { in: merchants } } } });
@@ -493,6 +512,23 @@ d('Payment requests — the customer → merchant target flow', () => {
   it('WhatsApp: REVERSE does not undo a payment to a business (S1)', async () => {
     const before = await wallet(ids.payer);
     await whatsapp(payerWaId, 'REVERSE');
+    expect(await wallet(ids.payer)).toBe(before);
+  });
+
+  it('Somalia: a USD wallet pays TILL … 12.50 in cents, both sides in USD', async () => {
+    const usdBalance = async () => (await prisma.account.findFirstOrThrow({ where: { merchantId: ids.merchantSO, type: 'axo_balance', currency: 'USD' } })).balanceMinor;
+    const mBefore = await usdBalance();
+    await whatsapp(somaliWaId, `PAY TILL ${ids.soTill} 12.50`);
+    await whatsapp(somaliWaId, PIN);
+    expect(await wallet(ids.somali)).toBe(10_000n - 1_250n); // USD 87.50 left
+    expect(await usdBalance()).toBe(mBefore + 1_250n);
+  });
+
+  it('KES: an amount with cents is refused, never rounded', async () => {
+    const before = await wallet(ids.payer);
+    await whatsapp(payerWaId, `PAY TILL ${ids.till} 12.50`);
+    expect(await prisma.pendingConfirm.findUnique({ where: { waId: payerWaId } })).toBeNull();
+    await whatsapp(payerWaId, PIN);
     expect(await wallet(ids.payer)).toBe(before);
   });
 });
