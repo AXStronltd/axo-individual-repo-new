@@ -20,6 +20,8 @@ Also fixed:
 - First-contact WhatsApp pay hard-coded `KES`.
 - `npm start` pointed at a file the build never produced.
 
+Later hardening: P2P sends can never target the internal clearing wallets (`sendP2P` refuses them, which covers WhatsApp `SEND` too).
+
 Each fix is tested by asserting that money did **not** move (`backend/test/payment-requests.e2e.test.ts`, `backend/test/hardening.test.ts`).
 
 ## Still needed before live money

@@ -5,7 +5,11 @@ import { requireCustomer } from '../../middleware/auth.js';
 import { bigintReplacer } from '../../lib/money.js';
 import { normalizeTag } from '../p2p/p2p.lib.js';
 import { verifyPin } from '../p2p/pin.service.js';
-import { payByNumber } from '../p2p/p2p.service.js';
+import { payByNumber, sendP2P } from '../p2p/p2p.service.js';
+import { isClearingTag } from '../p2p/p2p.lib.js';
+import { notifyCredit } from '../whatsapp/notify.service.js';
+import { encodeQr } from '../collect/collect.lib.js';
+import { qrSvg } from '../collect/qr.svg.js';
 import { sendToUnregistered, refundClaimable } from '../p2p/claim.service.js';
 import { reverseTransfer } from '../p2p/reversal.service.js';
 import { startCashIn, startCashOut } from '../cash/cash.service.js';
@@ -389,6 +393,51 @@ export async function customerRoutes(app: FastifyInstance) {
   // Customer-initiated money actions that used to take a customerId in the body
   // under a merchant token. The wallet is now always the token's own.
   // ---------------------------------------------------------------------------
+
+  /**
+   * Send to another Axo wallet by its @tag — the everyday "send money". Same
+   * server-authoritative sendP2P the WhatsApp SEND uses (limits, risk screen,
+   * balanced customer ledger), with a PIN step-up and a required Idempotency-Key
+   * so a double-tap or a retry never sends twice.
+   */
+  app.post('/customer/transfers', { preHandler: [requireCustomer] }, async (req, reply) => {
+    const body = z.object({ toTag: z.string().min(2).max(40), amountMinor: amountField, note: z.string().max(140).optional(), pin: pinField }).safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ error: 'invalid_body' });
+    const customerId = req.customer!.customerId;
+    const key = idempotencyKey(req, customerId);
+    if (!key) return reply.code(400).send({ error: 'missing_idempotency_key' });
+    const amt = toAmount(body.data.amountMinor);
+    if (amt === null) return reply.code(400).send({ error: 'bad_amount' });
+
+    const tag = normalizeTag(body.data.toTag);
+    const recipient = tag && !isClearingTag(tag) ? await prisma.customer.findUnique({ where: { axoTag: tag } }) : null;
+    if (!recipient) return reply.code(404).send({ error: 'recipient_not_found' });
+    if (recipient.id === customerId) return reply.code(409).send({ error: 'cannot send to yourself' });
+
+    if (!(await stepUp(customerId, body.data.pin, reply))) return;
+    const wallet = await prisma.customerAccount.findUnique({ where: { customerId } });
+    if (!wallet) return reply.code(409).send({ error: 'wallet_missing' });
+
+    try {
+      const existing = await prisma.p2PTransfer.findUnique({ where: { idempotencyKey: key } });
+      const xfer = await sendP2P({ senderId: customerId, recipientId: recipient.id, amountMinor: amt, currency: wallet.currency, note: body.data.note, idempotencyKey: key });
+      const me = await prisma.customer.findUnique({ where: { id: customerId } });
+      if (!existing) await notifyCredit({ customerId: recipient.id, amountMinor: xfer.amountMinor, currency: xfer.currency, from: me?.axoTag ?? 'an Axo user', kind: 'payment' });
+      const after = await prisma.customerAccount.findUnique({ where: { customerId } });
+      return reply.code(existing ? 200 : 201).send(json({
+        status: xfer.status, replayed: !!existing, transferId: xfer.id, to: recipient.axoTag, toName: recipient.displayName,
+        amountMinor: xfer.amountMinor, feeMinor: xfer.feeMinor, currency: xfer.currency, balanceMinor: after?.balanceMinor ?? 0n,
+      }));
+    } catch (e) { return reply.code(409).send({ error: (e as Error).message }); }
+  });
+
+  /** My "pay me" QR: encodes only my @tag; the payer still confirms amount and PIN. */
+  app.get('/customer/receive-qr.svg', { preHandler: [requireCustomer] }, async (req, reply) => {
+    const me = await prisma.customer.findUnique({ where: { id: req.customer!.customerId } });
+    if (!me) return reply.code(404).send({ error: 'not_found' });
+    return reply.header('content-type', 'image/svg+xml').header('cache-control', 'private, max-age=300')
+      .send(await qrSvg(encodeQr({ kind: 'tag', tag: me.axoTag })));
+  });
 
   /** Send to a phone number (registered or not). Reserves funds until claimed. */
   app.post('/customer/transfers/to-phone', { preHandler: [requireCustomer] }, async (req, reply) => {
