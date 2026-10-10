@@ -9,6 +9,7 @@ import {
   serializeRequest,
 } from './collect.service.js';
 import { encodeQr } from './collect.lib.js';
+import { qrSvg } from './qr.svg.js';
 import { prisma } from '../../db/client.js';
 
 function toBig(v: string | number): bigint | null { try { return BigInt(v); } catch { return null; } }
@@ -45,7 +46,7 @@ export async function collectRoutes(app: FastifyInstance) {
     if (!pn) return reply.code(404).send({ error: 'no_active_number' });
     const amt = q.amountMinor ? toBig(q.amountMinor) ?? undefined : undefined;
     const qr = encodeQr({ kind, number: pn.number, account: q.account, amountMinor: amt ?? undefined, currency: q.currency });
-    return reply.send({ qr, number: pn.number });
+    return reply.send({ qr, number: pn.number, svg: await qrSvg(qr) });
   });
 
   /**
@@ -126,6 +127,16 @@ export async function collectRoutes(app: FastifyInstance) {
     if (!r) return reply.code(404).send({ error: 'not_found' });
     if (req.auth!.role === 'cashier' && r.createdById !== req.auth!.userId) return reply.code(404).send({ error: 'not_found' });
     return reply.send(json(serializeRequest(r)));
+  });
+
+  // The request's QR as a scannable SVG image — for the Hub, a POS screen or a
+  // printed receipt. It encodes only the ref; amount and payee come from the server.
+  app.get('/payment-requests/:id/qr.svg', { preHandler: [requireAuth] }, async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const r = await readPaymentRequest({ id, merchantId: req.auth!.merchantId });
+    if (!r) return reply.code(404).send({ error: 'not_found' });
+    if (req.auth!.role === 'cashier' && r.createdById !== req.auth!.userId) return reply.code(404).send({ error: 'not_found' });
+    return reply.header('content-type', 'image/svg+xml').header('cache-control', 'private, max-age=300').send(await qrSvg(serializeRequest(r).qr));
   });
 
   // Void a pending request (sale cancelled at the till).

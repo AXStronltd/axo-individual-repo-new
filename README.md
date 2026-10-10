@@ -22,7 +22,27 @@ backend/    The money engine the wallet runs on — TypeScript · Fastify · Pos
 
 ## Frontend
 
-The wallet is a single self-contained HTML file — open `frontend/index.html` in a browser. It starts on a WhatsApp chat list; tap **Axo ✓** to enter the wallet.
+The wallet is plain HTML and JavaScript with no build step: `frontend/index.html` plus `frontend/live.js`. It starts on a WhatsApp-style chat list; tap **Axo ✓** to open the wallet and choose one of two options:
+
+- **Sign in to my wallet** with your Axo tag and PIN (for example the seeded `@amina` / `1234`). The chat then uses your real wallet on the backend:
+  - balance and history
+  - send to an @tag, or to any phone number
+  - pay a Till or Paybill
+  - scan or paste an Axo code
+  - pay or decline a business's request
+  - get cash at an agent, add money
+  - your "pay me" QR
+
+  Money you receive and requests from businesses appear in the chat by themselves. Every payment asks for your PIN, and the server checks it again.
+- **Try the demo**: the original walkthrough with sample money, labelled **DEMO** at the top.
+
+New wallets are still created over WhatsApp (`REGISTER`); the demo's sign-up here is only a demo.
+
+```bash
+cd backend && npm run dev                      # API on http://localhost:4000
+cd frontend && python3 -m http.server 8766     # then open http://127.0.0.1:8766
+# a different API: http://127.0.0.1:8766/?api=http://localhost:4100
+```
 
 ## Backend
 
@@ -34,12 +54,12 @@ npm install
 npm run prisma:migrate
 npm run seed                # demo wallets: @amina (funded), @juma; agent AMRAN
 npm run dev                 # http://localhost:4000/health
-npm test                    # 216 tests (DB e2e tests skip without Postgres)
+npm test                    # 223 tests (DB e2e tests skip without Postgres)
 ```
 
 ## Status
 
-216 automated tests pass. 42 of them run over HTTP against a real Postgres: paying a business with a PIN, exactly-once settlement, refunds, and the security fixes in **[SECURITY.md](SECURITY.md)**. Money units: KES in whole shillings; Somalia in USD cents. Nothing has run against live money, and the pages in `frontend/` are demo data that don't call the API yet. Going live needs funding rails, a security audit, and licensing (or a licensed partner). See `backend/README.md` and `docs/POS-API.md`.
+223 automated tests pass. 49 of them run over HTTP against a real Postgres: paying a business with a PIN, exactly-once settlement, refunds, and the security fixes in **[SECURITY.md](SECURITY.md)**. Money units: KES in whole shillings; Somalia in USD cents. Nothing has run against live money, and the wallet frontend's live mode was tested end to end in a real browser. Going live needs funding rails, a security audit, and licensing (or a licensed partner). See `backend/README.md` and `docs/POS-API.md`.
 
 ---
 

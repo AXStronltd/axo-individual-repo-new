@@ -51,7 +51,7 @@ TypeScript · Fastify · PostgreSQL (Prisma) · Redis-ready · Vitest.
 - **Merchant notifications** — a **transactional outbox**: `payment.succeeded` / `payment.refunded` / `payment_request.cancelled` events are written in the same DB transaction as the money movement, then delivered to the merchant's registered endpoints with an HMAC-SHA256 signature over `timestamp.body` (5-minute replay window) and retries with backoff. Plus a best-effort WhatsApp message to the owner/managers.
 - **POS API keys** — `POST /api-keys` (owner, signed in as a person) mints a hashed machine key with a fixed `cashier`/`manager` role; `requireRole` applies to it exactly as to staff.
 - **Daily settlement report** — `GET /reports/settlement?date=` gives gross / refunds / fees / net / payouts / closing balance, plus a cross-ledger check that every Axo payment and refund has its matching, balanced customer-side leg.
-- **Tests** — money math, ledger invariants, invoice logic, reconciliation, batch validation, P2P limits/legs/service, WhatsApp signature/de-dup/intent/OTP (pay-Till/Paybill, send-to-phone, claim/recall, setpin, mini), **claimable transfers (claim-by-number, claim-by-identity, re-point)**, cash ramps, risk, QR/FX/crypto, and **mini-statement + fee-preview + PIN-format** all pass (`npm test`). **216 tests**, of which 42 run over HTTP against a real Postgres (`test/c2m.e2e.test.ts`, `test/payment-requests.e2e.test.ts`) and are skipped when no database is reachable.
+- **Tests** — money math, ledger invariants, invoice logic, reconciliation, batch validation, P2P limits/legs/service, WhatsApp signature/de-dup/intent/OTP (pay-Till/Paybill, send-to-phone, claim/recall, setpin, mini), **claimable transfers (claim-by-number, claim-by-identity, re-point)**, cash ramps, risk, QR/FX/crypto, and **mini-statement + fee-preview + PIN-format** all pass (`npm test`). **223 tests**, of which 49 run over HTTP against a real Postgres (`test/c2m.e2e.test.ts`, `test/payment-requests.e2e.test.ts`, `test/wallet.e2e.test.ts`) and are skipped when no database is reachable.
 
 ## Run it
 
@@ -151,6 +151,8 @@ POS integration and webhooks: [`docs/POS-API.md`](../docs/POS-API.md).
 | `POST` | `/customer/payment-requests/:ref/pay` | customer + PIN | Pay a request — exactly once. |
 | `POST` | `/customer/payment-requests/:ref/decline` | customer | Decline a pushed request. |
 | `POST` | `/customer/pay-numbers/resolve`, `/customer/payments/by-number` | customer (+ PIN, `Idempotency-Key`) | Pay a Till/Paybill. |
+| `POST` | `/customer/transfers` | customer + PIN + `Idempotency-Key` | Send to another wallet by @tag (same limits and risk checks as WhatsApp SEND). |
+| `GET`  | `/customer/receive-qr.svg` | customer | My "pay me" QR (encodes only my @tag). |
 | `POST` | `/customer/transfers/to-phone` | customer + PIN + `Idempotency-Key` | Send to any phone; recipient claims. |
 | `POST` | `/customer/transfers/:id/reverse` | customer + PIN | Reverse own P2P send (never a payment to a business). |
 | `POST` | `/customer/claims/:code/recall` | customer | Recall own unclaimed send. |
@@ -166,7 +168,7 @@ POS integration and webhooks: [`docs/POS-API.md`](../docs/POS-API.md).
 ## What is NOT built yet
 
 - **Customer P2P over HTTP** — `/customer/*` covers paying businesses, send-to-phone, reverse, recall and cash; a direct `POST /customer/transfers` (send to a @tag) over `sendP2P` is still WhatsApp-only.
-- **Wallet frontend wiring** — the pages in `frontend/` are demo data only and make no API calls yet; the `/customer/*` routes are what they should call.
+- **Wallet sign-up over HTTP** — the wallet frontend (`frontend/live.js`) signs in existing wallets; creating one still happens over WhatsApp (`REGISTER` + OTP). The old prototypes (`axo-convert.html`, `axo-simulator.html`, …) remain demo-only.
 - **Branches / tills / shifts**, staff invites, merchant fees (MDR), MFA, audit-log writes, rate limiting, metrics.
 - **Cross-currency / cross-border P2P** — deliberately refused until a provider FX route is wired (the adapter layer is ready for it).
 - **Live ramp adapters** — the ramp interface, registry, sandbox, and an M-Pesa (Daraja) adapter *template* are built and tested; wiring the template to live STK push / B2C (and adding bank / agent adapters) needs real partner credentials (see below).

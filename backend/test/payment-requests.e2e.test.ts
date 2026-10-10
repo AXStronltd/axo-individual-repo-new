@@ -242,6 +242,16 @@ d('Payment requests — the customer → merchant target flow', () => {
     expect(await wallet(ids.payer)).toBe(OPENING);
   });
 
+  it('serves the request QR as a scannable SVG — to its own business only', async () => {
+    const res = await app.inject({ method: 'GET', url: `/payment-requests/${requestId}/qr.svg`, headers: auth(ids.cashierA) });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toContain('image/svg+xml');
+    expect(res.body).toMatch(/^<svg[\s\S]*<\/svg>\s*$/);
+    expect((await app.inject({ method: 'GET', url: `/payment-requests/${requestId}/qr.svg`, headers: auth(ids.ownerB) })).statusCode).toBe(404);
+    const till = await app.inject({ method: 'GET', url: '/collect/qr?kind=till', headers: auth(ids.ownerA) });
+    expect(till.json().svg).toContain('<svg');
+  });
+
   it('a wrong PIN moves nothing and leaves the request pending', async () => {
     const res = await pay(ref, ids.payerToken, '0000');
     expect(res.statusCode).toBe(401);

@@ -1,7 +1,7 @@
 import type { PrismaClient } from '@prisma/client';
 import { prisma, inTransaction } from '../../db/client.js';
 import { postLedger } from '../ledger/ledger.service.js';
-import { quoteTransfer, checkTransfer, transferLegs } from './p2p.lib.js';
+import { quoteTransfer, checkTransfer, transferLegs, isClearingTag } from './p2p.lib.js';
 import { screenMovement, openCase } from '../risk/risk.service.js';
 import { enqueueMerchantEvent } from '../notify/outbox.service.js';
 
@@ -102,6 +102,10 @@ export async function sendP2P(params: {
     const sender = await tx.customer.findUniqueOrThrow({ where: { id: params.senderId }, include: { wallet: true } });
     const recipient = await tx.customer.findUniqueOrThrow({ where: { id: params.recipientId }, include: { wallet: true } });
     if (!sender.wallet || !recipient.wallet) throw new Error('wallet_missing');
+    // The clearing wallets are the platform's side of business payments and cash
+    // movements, not people. A person-to-person send into or out of one would
+    // unbalance the clearing legs against the merchant ledger.
+    if (isClearingTag(recipient.axoTag) || isClearingTag(sender.axoTag)) throw new Error('recipient not found');
 
     const quote = quoteTransfer(params.amountMinor);
     const spendable = sender.wallet.balanceMinor - sender.wallet.reservedMinor;
