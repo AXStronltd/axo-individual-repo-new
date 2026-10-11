@@ -39,9 +39,24 @@ export function buildApp() {
     (req as any).rawBody = body;
     try {
       done(null, body ? JSON.parse(body as string) : {});
-    } catch (e) {
-      done(e as Error, undefined);
+    } catch {
+      // The caller's mistake, not ours: a 400, not a 500.
+      done(Object.assign(new Error('Body is not valid JSON'), { statusCode: 400, code: 'invalid_json' }), undefined);
     }
+  });
+
+  // Never send internals to the caller. An unexpected failure (a database error,
+  // a bug) returns a bare 500 with a request id; the details — which can name
+  // tables, files and config — go to the server log only. Client errors that
+  // Fastify raises itself (bad JSON, oversized body) keep their short message.
+  app.setErrorHandler((err, req, reply) => {
+    const status = err.statusCode && err.statusCode >= 400 && err.statusCode < 500 ? err.statusCode : 500;
+    if (status === 500) {
+      if (env.APP_ENV === 'live') req.log.error({ err }, 'unhandled error');
+      else if (process.env.NODE_ENV !== 'test') console.error(`[${req.id}] ${req.method} ${req.url}`, err);
+      return reply.code(500).send({ error: 'internal_error', requestId: req.id });
+    }
+    return reply.code(status).send({ error: err.code ?? 'bad_request', message: err.message });
   });
 
   // The bare URL of the service (what a browser, or a host's uptime check, hits
