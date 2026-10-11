@@ -15,6 +15,28 @@ const base = {
   SANDBOX_WEBHOOK_SECRET: 'sandbox-webhook-secret', OPS_API_KEY: undefined,
 };
 
+describe('error responses', () => {
+  it('an unexpected failure returns a bare 500 — no database or file details reach the caller', async () => {
+    const app = buildApp();
+    app.get('/__boom', async () => {
+      throw new Error('Invalid `prisma.customer.findUnique()` invocation: Environment variable not found: DATABASE_URL. --> schema.prisma:12');
+    });
+    const res = await app.inject({ method: 'GET', url: '/__boom' });
+    expect(res.statusCode).toBe(500);
+    expect(res.json()).toEqual({ error: 'internal_error', requestId: expect.any(String) });
+    expect(res.body).not.toMatch(/prisma|DATABASE_URL|schema/i);
+    await app.close();
+  });
+
+  it('a malformed request is still told what was wrong, as a 400', async () => {
+    const app = buildApp();
+    const res = await app.inject({ method: 'POST', url: '/customer/auth/login', headers: { 'content-type': 'application/json' }, payload: '{not json' });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBeTruthy();
+    await app.close();
+  });
+});
+
 describe('live config guard (S7)', () => {
   it('accepts a properly configured live deployment', () => {
     expect(liveConfigProblems(base)).toEqual([]);
