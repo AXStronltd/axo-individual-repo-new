@@ -1,0 +1,5 @@
+# The wallet is a static page: Netlify serves frontend/ as-is, no build step.
+[build]
+  base = "frontend"
+  publish = "."
+  command = "echo 'no build step'"
