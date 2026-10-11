@@ -13,6 +13,8 @@ import { qrSvg } from '../collect/qr.svg.js';
 import { sendToUnregistered, refundClaimable } from '../p2p/claim.service.js';
 import { reverseTransfer } from '../p2p/reversal.service.js';
 import { startCashIn, startCashOut } from '../cash/cash.service.js';
+import { BankDepositError, bankAccounts, cancelBankDepositIntent, createBankDepositIntent } from '../cash/bank.service.js';
+import { accountAccepts } from '../cash/bank.lib.js';
 import { agentCashOut } from '../agent/agent.service.js';
 import { parseQr } from '../collect/collect.lib.js';
 import { payPaymentRequest, declinePaymentRequest, readPaymentRequest } from '../collect/collect.service.js';
@@ -511,6 +513,58 @@ export async function customerRoutes(app: FastifyInstance) {
       if (r.status === 'unavailable') return reply.code(503).send({ error: 'ramp_unavailable', reason: r.reason });
       return reply.code(201).send(json(r));
     } catch (e) { return reply.code(409).send({ error: (e as Error).message }); }
+  });
+
+  // ---- Bank top-up (Phase 16): transfer from any bank, quoting a reference. ----
+  // Nothing here credits the wallet: that happens only when the deposit is
+  // confirmed by the collection bank's signed webhook or by an operator.
+
+  /** The collection accounts I can transfer to (for my wallet's currency). */
+  app.get('/customer/bank-deposits/accounts', { preHandler: [requireCustomer] }, async (req, reply) => {
+    const wallet = await prisma.customerAccount.findUnique({ where: { customerId: req.customer!.customerId } });
+    if (!wallet) return reply.code(409).send({ error: 'wallet_missing' });
+    const accounts = Object.entries(bankAccounts())
+      .filter(([, a]) => accountAccepts(a, wallet.currency))
+      .map(([bank, a]) => ({ bank, ...a }));
+    return reply.send({ currency: wallet.currency, accounts });
+  });
+
+  /** Ask to add money by bank transfer: returns the reference to quote and where to send it. */
+  app.post('/customer/bank-deposits', { preHandler: [requireCustomer] }, async (req, reply) => {
+    const body = z.object({ amountMinor: amountField, bank: z.string().min(1).max(32) }).safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ error: 'invalid_body' });
+    const customerId = req.customer!.customerId;
+    const key = idempotencyKey(req, customerId);
+    if (!key) return reply.code(400).send({ error: 'missing_idempotency_key' });
+    const amt = toAmount(body.data.amountMinor);
+    if (amt === null) return reply.code(400).send({ error: 'bad_amount' });
+    try {
+      const { intent, account, replayed } = await createBankDepositIntent({ customerId, amountMinor: amt, bank: body.data.bank, idempotencyKey: key });
+      const { idempotencyKey: _k, ...shown } = intent;
+      return reply.code(replayed ? 200 : 201).send(json({ ...shown, account, replayed }));
+    } catch (e) {
+      if (e instanceof BankDepositError) {
+        const code = e.message === 'unknown_bank' ? 404 : e.message === 'could_not_allocate_reference' ? 503 : 409;
+        return reply.code(code).send({ error: e.message });
+      }
+      throw e;
+    }
+  });
+
+  /** My recent bank top-ups and where each one stands. */
+  app.get('/customer/bank-deposits', { preHandler: [requireCustomer] }, async (req, reply) => {
+    const rows = await prisma.bankDepositIntent.findMany({
+      where: { customerId: req.customer!.customerId }, orderBy: { createdAt: 'desc' }, take: 20,
+      select: { reference: true, amountMinor: true, currency: true, bank: true, status: true, createdAt: true, expiresAt: true, confirmedAt: true },
+    });
+    return reply.send(json({ deposits: rows }));
+  });
+
+  /** Cancel one of MY bank top-ups that hasn't arrived yet. */
+  app.post('/customer/bank-deposits/:reference/cancel', { preHandler: [requireCustomer] }, async (req, reply) => {
+    const { reference } = req.params as { reference: string };
+    const r = await cancelBankDepositIntent({ reference, customerId: req.customer!.customerId });
+    return reply.code(r.ok ? 200 : r.reason === 'unknown_reference' ? 404 : 409).send(r);
   });
 
   /** Withdraw cash at an agent: I authorise the debit of MY wallet with my PIN. */

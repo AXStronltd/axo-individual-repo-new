@@ -495,6 +495,41 @@ model CashTransfer {
 }
 
 // ============================================================================
+// BANK COLLECTION (Phase 16) — fund a wallet by ordinary bank transfer. Axo
+// issues a reference; the customer quotes it on a transfer to Axo's collection
+// account; the wallet is credited only when the deposit is CONFIRMED (signed
+// bank webhook, or an operator matching a statement line). The intent itself
+// never moves money. Settlement is a CashTransfer (provider "bank").
+// ============================================================================
+
+enum BankDepositStatus {
+  awaiting // reference issued, waiting for the customer's bank transfer
+  credited // deposit confirmed and wallet credited (settled via CashTransfer)
+  expired // reference lapsed before any matching deposit arrived
+  cancelled // the customer or an operator cancelled the intent
+}
+
+model BankDepositIntent {
+  id             String            @id @default(uuid())
+  customerId     String
+  amountMinor    BigInt // what the customer said they'd send
+  currency       String
+  reference      String            @unique // what the customer quotes on the bank transfer
+  bank           String // collection account key (e.g. "galaxy")
+  status         BankDepositStatus @default(awaiting)
+  idempotencyKey String? // scoped per customer (see @@unique)
+  cashTransferId String?           @unique // the CashTransfer that settled it, once credited
+  confirmedMode  String? // "auto" (bank webhook) | "manual" (operator)
+  createdAt      DateTime          @default(now())
+  expiresAt      DateTime
+  confirmedAt    DateTime?
+
+  @@unique([customerId, idempotencyKey])
+  @@index([customerId])
+  @@index([status])
+}
+
+// ============================================================================
 // AGENT NETWORK (Phase 11) — Axo's OWN cash on-ramp/off-ramp. An agent takes
 // physical cash from a customer and credits their Axo wallet (cash-in), or pays
 // a customer cash and debits their wallet (cash-out). This is how Axo gets money

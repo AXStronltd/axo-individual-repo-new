@@ -30,6 +30,14 @@ const schema = z.object({
   // Platform-operator credential (X-Ops-Key header) for actions no merchant may
   // take: creating agents and funding agent float. Unset ⇒ those routes refuse.
   OPS_API_KEY: z.string().optional(),
+  // Bank collection (Phase 16). The collection bank signs its deposit webhooks
+  // with this; unset ⇒ the automated webhook refuses (503) and only an operator
+  // can confirm deposits.
+  BANK_WEBHOOK_SECRET: z.string().optional(),
+  // The real collection accounts customers transfer to, as JSON keyed by bank
+  // code (see bank.lib.ts). Unset ⇒ live refuses bank top-ups; sandbox offers a
+  // clearly-labelled sandbox account. Account details are never invented.
+  BANK_COLLECTION_ACCOUNTS: z.string().optional(),
 });
 
 // Allow tests to run without a full .env by supplying safe defaults.
@@ -54,6 +62,8 @@ const raw = {
   CRYPTO_API_KEY: process.env.CRYPTO_API_KEY,
   SANDBOX_WEBHOOK_SECRET: process.env.SANDBOX_WEBHOOK_SECRET ?? 'sandbox-webhook-secret',
   OPS_API_KEY: process.env.OPS_API_KEY,
+  BANK_WEBHOOK_SECRET: process.env.BANK_WEBHOOK_SECRET,
+  BANK_COLLECTION_ACCOUNTS: process.env.BANK_COLLECTION_ACCOUNTS,
 };
 
 // Public placeholder values that ship in code or in .env.example. Any of these in
@@ -85,6 +95,8 @@ export function liveConfigProblems(e: z.infer<typeof schema>): string[] {
     else if (value.length < 32 && name.startsWith('JWT')) problems.push(`${name} must be at least 32 characters`);
   }
   if (e.JWT_SECRET === e.JWT_REFRESH_SECRET) problems.push('JWT_SECRET and JWT_REFRESH_SECRET must differ');
+  // Optional, but a short shared secret would let anyone forge bank deposits.
+  if (e.BANK_WEBHOOK_SECRET !== undefined && e.BANK_WEBHOOK_SECRET.length < 32) problems.push('BANK_WEBHOOK_SECRET must be at least 32 characters');
   return problems;
 }
 

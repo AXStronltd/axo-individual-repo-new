@@ -522,7 +522,7 @@ const DOLLAR_SPREAD=0.001, FX_MARGIN=0.015, FX_FEE_PCT=0.005, SEND_FEE=0.005;
 
 /* ============ STATE (one ledger) ============ */
 let S={};
-function reset(){ S={axoId:null,name:null,email:null,phone:null,codeHash:null,_salt:null,sessions:[],verified:false,tier:null,country:null,bank:null,wallet:null,bal:{USD:0,USDC:0,USDT:0,KES:0,SOS:0},step:'boot',draft:{},claims:[],funds:[],pendingIn:[],recovery:null,riskLock:false,_iv:null}; chat.innerHTML=''; window._journal=[]; }
+function reset(){ S={axoId:null,name:null,email:null,phone:null,codeHash:null,_salt:null,sessions:[],verified:false,tier:null,country:null,bank:null,wallet:null,bal:{USD:0,USDC:0,USDT:0,KES:0,SOS:0},step:'boot',draft:{},claims:[],funds:[],pendingIn:[],bankIntents:[],recovery:null,riskLock:false,_iv:null}; chat.innerHTML=''; window._journal=[]; }
 
 /* ============================================================
    AXO IDENTITY SYSTEM
@@ -1835,16 +1835,78 @@ async function addMoneyRail(k){
   if(k==='card') return cardTopup();
   if(k==='crypto') return cryptoTopup();
   if(k==='agent') return agentDeposit();
-  // mpesa / evc / bankt / remit → simple amount → simulated credit
+  if(k==='bankt') return bankTransferDeposit();
+  // mpesa / evc / remit → simple amount → simulated credit
   await typing(500);
-  const label={mpesa:'Enter the amount to add from M-Pesa. You\'ll get an STK prompt on your phone to approve.',evc:'Enter the amount to add from your mobile money wallet.',bankt:'Enter the amount to transfer from your bank.',remit:'Enter the amount your family is sending you.'}[k];
+  const label={mpesa:'Enter the amount to add from M-Pesa. You\'ll get an STK prompt on your phone to approve.',evc:'Enter the amount to add from your mobile money wallet.',remit:'Enter the amount your family is sending you.'}[k];
   inBub(label);
   addAmount(k,async(amt)=>{
     await typing(700);
     if(k==='mpesa'){inBub(`📲 STK push sent to your phone — approve the M-Pesa prompt…`);await wait(1200);}
     if(k==='remit'){inBub(`🌍 Your family's transfer is on the way…`);await wait(1000);}
-    creditFiat(amt,{mpesa:'M-Pesa',evc:'Mobile money',bankt:'Bank transfer',remit:'Remittance'}[k]);
+    creditFiat(amt,{mpesa:'M-Pesa',evc:'Mobile money',remit:'Remittance'}[k]);
   });
+}
+
+/* BANK TRANSFER top-up — the real reference-based collection flow.
+   Axo issues a reference + shows its collection account; the user transfers
+   from ANY bank (RTGS reaches all banks via one collection bank). The money
+   lands only when the deposit is confirmed — automatically by the bank's
+   webhook, or by an ops match. Mirrors the backend createBankDepositIntent →
+   confirmBankDeposit path. */
+async function bankTransferDeposit(){
+  await typing(500);
+  inBub(`Enter the amount you'll transfer from your bank.`);
+  addAmount('bankt',async(amt)=>{
+    await typing(700);
+    // issue a reference (backend: POST /collections/bank/intent)
+    const ref='AXO-GALA-'+Math.floor(100000+Math.random()*900000);
+    if(!S.bankIntents)S.bankIntents=[];
+    S.bankIntents.push({ref,amount:amt,status:'awaiting'});
+    const cur=S.country==='Kenya'?'KES':'USD';
+    const acct=S.country==='Kenya'
+      ? {bank:'Axo Collection (via Paykit)',name:'Axo Technologies Ltd',num:'01• •••• •••• 042',rtgs:'Any Kenyan bank · RTGS/PesaLink'}
+      : {bank:'Axo Collection (via Galaxy Bank)',name:'Axo Technologies Ltd',num:'10• •••• •••• 880',rtgs:'Any Somali bank · RTGS'};
+    const c=document.createElement('div');c.className='card wide';
+    c.innerHTML=`<div class="card-h">🏦 Transfer to add ${cur==='USD'?'$':''}${fmt(amt)}${cur!=='USD'?' '+cur:''}</div><div class="card-b recpt">
+      <div class="rr"><span>Pay to</span><b>${acct.bank}</b></div>
+      <div class="rr"><span>Account name</span><span>${acct.name}</span></div>
+      <div class="rr"><span>Account number</span><span style="font-variant-numeric:tabular-nums">${acct.num}</span></div>
+      <div class="rr"><span>From</span><span>${acct.rtgs}</span></div>
+      <div class="rr" style="border-top:1px dashed var(--line);margin-top:4px;padding-top:8px"><span>Reference <small style="color:var(--warn)">(must include)</small></span><b style="letter-spacing:.5px;color:var(--axo-deep)">${ref}</b></div>
+    </div>`;
+    raw(c);
+    await typing(700);
+    inBub(`Open your bank app and send <b>${cur==='USD'?'$':''}${fmt(amt)}</b> to the account above, quoting the reference <b>${ref}</b>. The moment your bank confirms it, the money lands here — automatically. No app to install on your side.`);
+    actions([
+      {g:'✅',label:"I've sent it",fn:()=>bankDepositSent(ref,amt,cur)},
+      {g:'↩︎',label:'Cancel',dim:true,fn:()=>{const i=S.bankIntents.find(x=>x.ref===ref);if(i)i.status='cancelled';inBub('No problem — cancelled. Nothing was added.');mainMenu();}},
+    ],{center:true});
+  });
+}
+
+async function bankDepositSent(ref,amt,cur){
+  outBub("✅ I've sent it");
+  await typing(900);
+  inBub(`👀 Watching for your transfer with reference <b>${ref}</b>…`);
+  await wait(1400);
+  // automated confirmation (backend: bank webhook → confirmBankDeposit mode 'auto')
+  const i=(S.bankIntents||[]).find(x=>x.ref===ref);
+  if(i&&i.status==='awaiting'){i.status='credited';}
+  const k=cur==='USD'?'USD':cur;
+  S.bal[k]=+((S.bal[k]||0)+amt).toFixed(2);
+  const c=document.createElement('div');c.className='card wide';
+  c.innerHTML=`<div class="card-h" style="background:linear-gradient(135deg,#0e8a52,#00a884)">✅ Money added</div><div class="card-b recpt">
+    <div class="rr"><span>Added</span><b style="color:var(--axo-deep)">${cur==='USD'?'$':''}${fmt(amt)}${cur!=='USD'?' '+cur:''}</b></div>
+    <div class="rr"><span>From</span><span>Bank transfer</span></div>
+    <div class="rr"><span>Reference</span><span>${ref}</span></div>
+    <div class="rr"><span>New balance</span><b>${cur==='USD'?'$':''}${fmt(S.bal[k])}${cur!=='USD'?' '+cur:''}</b></div>
+    <div class="rr"><span>Confirmed by</span><span>Bank · automatic</span></div>
+  </div>`;
+  raw(c);
+  await typing(600);
+  inBub(`Done — your bank transfer was confirmed and the money is in your Axo wallet. Reply BALANCE anytime.`);
+  mainMenu();
 }
 
 /* generic amount entry for add-money */
