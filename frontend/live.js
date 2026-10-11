@@ -11,6 +11,7 @@
      scan / paste a code → /customer/scan    requests → /customer/payment-requests
      history → /customer/transfers           receive  → /customer/receive-qr.svg
      cash at an agent → /customer/agents/:code/withdraw   add money → /customer/cash/in
+     add money by bank transfer → /customer/bank-deposits (reference; credited when the bank confirms)
 
    Every debit asks for the PIN, and the server checks it again. The chat only
    ever reports what the server says happened: it never decides money moved.
@@ -26,7 +27,7 @@
 
   var L = (window.AXO_WALLET_LIVE = {
     on: false, base: DEFAULT_API, token: null, refreshToken: null, me: null,
-    awaiting: null, secret: false, poll: null, seenIn: null, seenReqs: {},
+    awaiting: null, secret: false, poll: null, seenIn: null, seenReqs: {}, bankWatch: {},
   });
 
   /* ---------------------------------------------------------------- storage */
@@ -109,6 +110,9 @@
     bad_qr: 'That isn’t an Axo code.',
     ramp_unavailable: 'Adding money isn’t available in your country yet — there’s no funding partner connected.',
     bad_amount: 'That amount doesn’t look right.',
+    unknown_bank: 'That bank account isn’t available for top-ups.',
+    currency_not_accepted: 'That bank can’t take your wallet’s currency.',
+    account_frozen: 'Your wallet is frozen. Contact Axo support.',
   };
   function errText(e) {
     if (e && MESSAGES[e.code]) return MESSAGES[e.code];
@@ -537,6 +541,12 @@
 
   /* -------------------------------------------------------------- add money */
   async function addMoneyFlow() {
+    var how = await ask('How do you want to add money?', { chips: [
+      { g: '🏦', label: 'Bank transfer', value: 'bank' },
+      { g: '📲', label: 'Mobile money / other', value: 'ramp' },
+    ] });
+    if (how === null) return cancelled();
+    if (how === 'bank') return bankTopUpFlow();
     var amount = await askAmount('How much do you want to add? (' + esc(cur()) + ')');
     if (amount === null) return cancelled();
     var source = await ask('From which account or phone number?');
@@ -547,6 +557,44 @@
       await say('Your wallet is credited the moment the provider confirms the money arrived — not before. I’ll tell you here.');
     } catch (e) { await say(errText(e)); }
     menu();
+  }
+
+  /* Bank transfer: Axo gives a reference; the wallet is credited only when the
+     bank (or an Axo operator) confirms the deposit arrived — never on this request. */
+  async function bankTopUpFlow() {
+    var list;
+    try { list = (await api('/customer/bank-deposits/accounts')).accounts; }
+    catch (e) { await say(errText(e)); return menu(); }
+    if (!list.length) { await say('Bank top-ups aren’t available for your wallet yet — no collection bank is connected.'); return menu(); }
+    var bank = list.length === 1 ? list[0].bank : await ask('Which bank account will you send to?', {
+      chips: list.map(function (a) { return { g: '🏦', label: a.bankName, value: a.bank }; }),
+    });
+    if (bank === null) return cancelled();
+    var amount = await askAmount('How much will you transfer from your bank? (' + esc(cur()) + ')');
+    if (amount === null) return cancelled();
+    try {
+      var d = await api('/customer/bank-deposits', { method: 'POST', headers: { 'idempotency-key': uuid() }, body: { amountMinor: amount, bank: bank } });
+      var a = d.account;
+      card('🏦 Transfer to add ' + fmtMinor(d.amountMinor, d.currency), [
+        ['Pay to', '<b>' + esc(a.bankName) + '</b>'],
+        ['Account name', esc(a.accountName)],
+        ['Account number', '<span style="font-variant-numeric:tabular-nums">' + esc(a.accountNumber) + '</span>'],
+      ].concat(a.network ? [['From', esc(a.network)]] : [], [
+        ['Reference <small style="color:var(--warn)">(must include)</small>', '<b style="letter-spacing:.5px">' + esc(d.reference) + '</b>', true],
+        ['Use by', new Date(d.expiresAt).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })],
+      ]), {});
+      L.bankWatch[d.reference] = true;
+      await say('Send <b>' + fmtMinor(d.amountMinor, d.currency) + '</b> from your bank to the account above and quote <b>' + esc(d.reference) + '</b>. Your wallet is credited once the bank confirms it arrived — not before. I’ll tell you here.');
+      actions([
+        { g: '✅', label: 'I’ve sent it', fn: async function () { outBub('I’ve sent it'); await say('👀 Thanks — I’m watching for reference <b>' + esc(d.reference) + '</b>. Bank transfers can take a while.'); menu(); } },
+        { g: '↩︎', label: 'Cancel', dim: true, fn: async function () {
+          outBub('Cancel');
+          try { await api('/customer/bank-deposits/' + encodeURIComponent(d.reference) + '/cancel', { method: 'POST' }); delete L.bankWatch[d.reference]; await say('Cancelled — nothing was added. Don’t send money with that reference.'); }
+          catch (e) { await say(errText(e)); }
+          menu();
+        } },
+      ], { center: true });
+    } catch (e) { await say(errText(e)); menu(); }
   }
 
   /* -------------------------------------------------------- free-text intents */
@@ -567,6 +615,7 @@
     if (/request|asking me|waiting/.test(low)) return requestsFlow();
     if (/receive|get paid|my qr|my tag/.test(low)) return receiveFlow();
     if (/scan|qr/.test(low)) return scanFlow();
+    if (/\bbank\b/.test(low)) return bankTopUpFlow();
     if (/till|paybill|pay /.test(low)) return payFlow();
     if (/send|transfer/.test(low)) return sendFlow();
     if (/withdraw|cash/.test(low)) return agentFlow();
@@ -582,6 +631,7 @@
       var rows = await api('/customer/transfers');
       L.seenIn = rows.length ? rows[0].createdAt : new Date(0).toISOString();
       (await api('/customer/payment-requests')).forEach(function (r) { L.seenReqs[r.ref] = true; });
+      (await api('/customer/bank-deposits')).deposits.forEach(function (x) { if (x.status === 'awaiting') L.bankWatch[x.reference] = true; });
     } catch (e) { L.seenIn = new Date(0).toISOString(); }
   }
 
@@ -601,6 +651,19 @@
       var reqs = await api('/customer/payment-requests');
       for (var j = 0; j < reqs.length; j++) {
         if (!L.seenReqs[reqs[j].ref]) { await say('🔔 <b>' + esc(reqs[j].merchantName) + '</b> sent you a payment request.'); offerRequest(reqs[j]); }
+      }
+      if (Object.keys(L.bankWatch).length) {
+        var deps = (await api('/customer/bank-deposits')).deposits;
+        for (var k = 0; k < deps.length; k++) {
+          var x = deps[k];
+          if (!L.bankWatch[x.reference] || x.status === 'awaiting') continue;
+          delete L.bankWatch[x.reference];
+          if (x.status === 'credited') {
+            await say('🔔 <b>Your bank transfer arrived!</b>');
+            card('✅ Money added', [['Reference', esc(x.reference)], ['From', 'Bank transfer']], { ok: true });
+            await showBalance();
+          }
+        }
       }
     } catch (e) { /* transient; next tick retries */ }
   }

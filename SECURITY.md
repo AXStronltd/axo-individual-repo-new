@@ -22,6 +22,13 @@ Also fixed:
 
 Later hardening: P2P sends can never target the internal clearing wallets (`sendP2P` refuses them, which covers WhatsApp `SEND` too).
 
+Bank top-ups (merged from the uploaded bank-collection files): the upload was fixed before merging.
+- **Wallet credits:** its manual-confirm route let any business owner or accountant credit any wallet with money that never arrived. Only the platform operator key (`X-Ops-Key`) can confirm deposits now.
+- **Cash routes:** it re-opened `/cash/in` and `/cash/out` under merchant tokens. They stay removed.
+- **References:** any staff token could create or cancel references for any customer. Each customer now manages their own.
+- **Exactly once:** the bank webhook must be signed and must carry the bank's transaction id. One bank transaction can credit only one reference, and a reference credits only once.
+- **Tests:** these are in `backend/test/bank-collection.e2e.test.ts`.
+
 Each fix is tested by asserting that money did **not** move (`backend/test/payment-requests.e2e.test.ts`, `backend/test/hardening.test.ts`).
 
 ## Still needed before live money

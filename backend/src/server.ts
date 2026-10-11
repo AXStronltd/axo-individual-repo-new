@@ -2,6 +2,7 @@ import { buildApp } from './app.js';
 import { env } from './config/env.js';
 import { dispatchDueDeliveries } from './modules/notify/outbox.service.js';
 import { sweepExpiredClaims } from './modules/p2p/claim.service.js';
+import { sweepExpiredBankIntents } from './modules/cash/bank.service.js';
 
 const app = buildApp();
 
@@ -20,6 +21,7 @@ function every(ms: number, name: string, job: () => Promise<unknown>) {
 }
 every(5_000, 'webhook dispatch', () => dispatchDueDeliveries());
 every(60_000, 'claim expiry sweep', () => sweepExpiredClaims());
+every(60_000, 'bank reference expiry sweep', () => sweepExpiredBankIntents());
 
 app
   .listen({ port: env.PORT, host: '0.0.0.0' })

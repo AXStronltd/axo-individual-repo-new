@@ -29,6 +29,11 @@ describe('live config guard (S7)', () => {
     expect(liveConfigProblems({ ...base, ARGON2_PEPPER: '' }).length).toBeGreaterThan(0);
     expect(liveConfigProblems({ ...base, JWT_REFRESH_SECRET: base.JWT_SECRET }).length).toBeGreaterThan(0);
   });
+  it('refuses a short bank webhook secret, but bank collection may be left unconfigured', () => {
+    expect(liveConfigProblems({ ...base, BANK_WEBHOOK_SECRET: 'short' }).join(' ')).toContain('BANK_WEBHOOK_SECRET');
+    expect(liveConfigProblems({ ...base, BANK_WEBHOOK_SECRET: 'b'.repeat(32) })).toEqual([]);
+    expect(liveConfigProblems({ ...base, BANK_WEBHOOK_SECRET: undefined })).toEqual([]);
+  });
   it('does not apply in sandbox', () => {
     expect(liveConfigProblems({ ...base, APP_ENV: 'sandbox', JWT_SECRET: 'dev-access-secret' })).toEqual([]);
   });

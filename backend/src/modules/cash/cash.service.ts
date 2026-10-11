@@ -9,7 +9,7 @@ import { screenMovement, openCase } from '../risk/risk.service.js';
  * in); cash-out debits the customer wallet and credits clearing (money goes out).
  * Either way the customer ledger stays two-sided and balances.
  */
-async function clearingWallet(tx: PrismaClient, currency: string) {
+export async function clearingWallet(tx: PrismaClient, currency: string) {
   const tag = '@axo_clearing_' + currency.toLowerCase();
   let sys = await tx.customer.findUnique({ where: { axoTag: tag }, include: { wallet: true } });
   if (!sys) {
@@ -25,7 +25,7 @@ async function clearingWallet(tx: PrismaClient, currency: string) {
 }
 
 /** Post a balanced pair to the customer ledger against a CashTransfer. */
-async function postCashLedger(
+export async function postCashLedger(
   tx: PrismaClient,
   cashTransferId: string,
   legs: Array<{ accountId: string; direction: 'debit' | 'credit'; amountMinor: bigint; currency: string }>,
